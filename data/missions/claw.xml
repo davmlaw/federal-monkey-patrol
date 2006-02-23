@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<mission>
+
+<startconditions>
+  <height>5000</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <claw>
+    <targetheight>1500</targetheight>
+     <!-- Inc/Dec is percentage, ie 5% per second, ie 20secs to be caught -->
+    <inc>5</inc>
+    <dec>10</dec>
+  </claw>
+</startconditions>
+
+<!--
+<constraints>
+  <maxheight>10000</maxheight>
+  <minheight>5000</minheight>
+  <maxspeed>100</maxspeed>
+  <minspeed>50</minspeed>
+</constraints>
+-->
+
+<!--
+<outcomes>
+  <scenario>
+    <condition>
+       <stat name="game_seconds" op="gte" value="50" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>Timed out!</message>
+    </result>
+  </scenario>
+</outcomes>
+-->
+
+</mission>

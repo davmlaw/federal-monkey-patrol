@@ -1,0 +1,356 @@
+<HTML>
+<BODY>
+
+                            <H1 ALIGN=CENTER>TODO</H1>
+
+<H2>CODE</H2>
+
+
+
+<H3>Graphics</H3>
+
+<PRE>
+
+
+LSYstem use char[256] rather than map...
+
+draw() accepts collider...
+
+
+drawdetails.collider
+
+intersects( );
+
+isOccluded is really just collision detection, so make 1 interface.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+basic idea:
+
+city / bullet collide against each other
+
+city->hit(Bullet)
+bullet->hit(City)
+
+foreach (ent : Entity) {
+	ent->collide(city)        - if this happens, ent->hit(city), city->hit(ent)
+}
+
+for( e = entities.begin() ; e != entities.end() ; ++e ) {
+	other = e;
+	++other;
+	for ( ; other != entities.end() ; ++other ) {
+		e->collide(otherEntity);
+	}
+}
+
+mapping of entities to drawables?
+
+what does entity mean: 3d object in the game world that moves around, etc
+
+what does drawable mean: 3d object that is drawn
+
+is an entity a drawable?
+
+could you ever want invisible entities? no
+
+entity : BoundedDrawable {
+
+}
+
+
+TODO
+----
+Drawable:
+friend containers_that_only_call_representation (then Flyweight can inherit from that)
+
+InputManager could just return new input object?
+
+----
+
+	
+Do we need BoundedDrawable->add(Drawable);
+get rid DrawableContainer as BoundedDrawableContainer does what it does? Or implemente BDC in terms of DC (or template?)
+Check if there is a way to abstract the diff between ->add() and no add() etc so both can be in same tree somehow
+	
+City block etc should pass in heights, or somehow end up with
+the city having the right heights. Maybe this means constructing
+children first, and have each drawable only know it's height at
+instatiation time, though containers can't do that...
+
+Patchgrid etc is a mess
+
+Remove height from drawables (bounded now takes care of this)
+
+What about the offset/scale in drawdetails? Handle this in a subclasses
+Visitor? ie RenderingVisitor?
+</PRE>
+
+<BR>
+
+<UL><B>3d</B>
+<LI><strike>Claw Shadow</strike>
+<LI>Proper Billboards
+<LI><strike>Rooves drawn separately to speed up FPS</strike>
+<LI>Make cityblock class (parklands and office etc inherit from) that
+contains list of billboards that replace crosstrees
+<LI>Town Planner
+</UL>
+
+<UL><B>2d</B>
+<LI><strike>Container for Head Up Display etc</strike>
+<LI><strike>Make left/right up/down etc</strike>
+</UL>
+
+<UL><B>Other</B>
+<LI>Camera - Chase, TopDown, Smoothing
+<LI><strike>Change screen/resolution etc via config file</strike>
+</UL>
+
+
+<H3>Input</H3>
+<UL>
+<LI>TopDown Raptor-like Mode (constrained/unconstrained)
+<LI>TopDown rotate left/right mode
+<LI>Follow Plane Mode
+<LI>Keyboard
+<LI>Mouse
+<LI>Joystick
+<LI>Keyboard Config
+<LI>Mouse Config
+<LI>Joystick Config
+</UL>
+
+<H3>Sound</H3>
+<UL>
+<LI><strike>Implement Inital</strike>
+<LI><strike>SFX</strike>
+<LI><strike>Music</strike>
+<LI><strike>Working in Story/game files</strike>
+<LI><strike>Music Chyrons - Those Artist/Track type things</strike>
+</UL>
+
+<H3>Game</H3>
+<UL>
+<LI><strike>Story - Fixed number of seconds to display (rather than
+word count)</strike>
+<LI><strike>Missions - settings/rules that turned on</strike>
+<LI><strike>GameStatistics - Blonde counting/claw etc</strike>
+<LI><strike>Predicate/conditional XML ant-like stuff for missions</strike>
+<LI>Tuner front end
+<LI>Tuner back end
+<LI>Loading, move stuff from missionbuilder into own classes/files
+</UL>
+
+<H3>Transitions</H3>
+<UL>
+<LI>Transition/FX
+<LI><strike>Transition arbitary direction wipe</strike>
+<LI>Sams zoom into picture thing</LI>
+</UL>
+
+<H3>World</H3>
+<UL>
+<LI>Collision Detection
+<LI>Proper Physics
+</UL>
+
+<H3>Util</H3>
+<UL>
+<LI><strike>Replace rand()/srand() with Mersenne Twister</strike>
+<LI>Replace settings.get() with settings.gets() etc.
+<LI><strike>Make Properties file Generic (use pointers, though so you can return null for empty)</strike>
+<LI> Makefiles could include a base one to reduce duplication
+<LI>Hysterisis class?- reduce popping etc
+<LI><strike>Scalars working nicely</strike>
+</UL>
+
+<H3>Optimisations</H3>
+<UL>
+
+<LI>PatchGrid - If all inside frustum don't descend tree draw all in array.
+<LI>LOD and hiding of invisible sides sides can be calculated
+statically with quadtree
+</UL>
+
+<H3>Code Cleanup</H3>
+<UL>
+<LI><strike>WordList2D should remove portrait</strike>
+<LI><strike>Change DrawContext2d to draw in middle, not 0->1</strike>
+<LI>Used Container2D in classes that just instantiate/draw/delete things
+<LI>Change Drawable2D (maybe 3D) to use 1.0f/1.0f as dimensions and
+then automatically scale children
+<LI>Use vector2d get_size() for drawable2D stuff to reduce code dupe
+<LI>PatchGrid needs to recalculate height etc, (or just use 2D frustum cull)
+<LI><strike> 1st pass standardizing on camelCase method names</strike>
+<LI>-Make drawable->position public, so we can += etc, but need to change patchgrid to do this
+</UL>
+
+<HR>
+
+<H2>TODO: ART</H2>
+
+<H3>Story</H3>
+<UL>
+<LI>Finish Story (this will fix what we decide to do with game art)
+<LI>Decent mugshots/portraits of all main characters
+<LI>Decent copy of story backgrounds
+<LI>
+</UL>
+
+<H3>Models (static)</H3>
+<UL>
+<LI><strike>Kong</strike>
+<LI><strike>Plane</strike>
+<LI><strike>Blonde</strike>
+<LI><strike>Lamp Post</strike>
+<LI><strike>Fire Hydrant</strike>
+<LI><strike>Post Box</strike>
+<LI>Building window
+</UL>
+
+
+<H3>Textures</H3>
+<UL>
+<LI><strike>Street</strike>
+<LI><strike>Grass</strike>
+<LI>Skyscraper/building windows
+<LI>Building Tops
+<LI>Misc City Art...
+</UL>
+
+<HR>
+<H2>TODO: SOUND</H2>
+<H3>Story SFX</H3>
+<UL>
+<LI><strike>Phone Ring</strike>
+<LI>Projector sound
+<LI>harlow drinking/bottles smash
+</UL>
+
+<H3>Story</H3>
+<UL>
+<LI>In Game Voices (ie chief over radio/instructions)
+<LI>Story Voices
+</UL>
+
+<H3>SFX</H3>
+<UL>
+<LI>Plane Engine
+<LI>Plane Crash/explosion
+<LI>Machine Gun
+<LI>Buildings damaged
+<LI>Kong Roar
+<LI>Kong Pain
+<LI>Kong Die
+<LI>Blonde Scream
+<LI>Blonde "you're my hero" (or something)
+<LI>Giant Claw Squawk
+<LI>Giant Claw Gets You (squawk squawk - aaarrrggghhh!)
+</UL>
+
+<H3>Misc</H3>
+<UL>
+<LI>Menu Move selection sound (tick/click etc)
+<LI>Menu select sound
+</UL>
+
+
+<HR>
+<H2>TODO: DATA</H2>
+
+<H3>Story</H3>
+<UL>
+<LI>Finish the plot outline
+<LI>Work out scenes & storyboard so we can make backgrounds
+<LI>Finish game text/speech
+</UL>
+
+
+<H4> Final Stuff to do before release (EVERY CLASS): </H4>
+<UL>
+<LI> Final pass standardizing on camelCase method names
+<LI>-Make sure everything is initialised to null, and destructed
+<LI>-Move stuff from header file into .cpp
+<LI>-Move stuff into individual files
+</UL>
+
+
+
+
+<HR>
+<HR>
+<H1> NEXT TIME (known bugs) </H1>
+
+<UL>
+<LI>Buildings taking damage
+<LI>Model Animation
+<LI>3D Windows on Buildings
+<LI>Maybe some menus
+<LI>Vertex Arrays for skyscraper, building, models etc..
+</UL>
+
+<H3>Models (animated)</H3>
+<UL>
+<LI>Kong
+<LI>Blonde
+</UL>
+
+<H3>Models Levels of Detail</H3>
+<UL>
+<LI>Are we going to do this? Could probably find a tool to do this
+pre-processing for us.
+</UL>
+
+IDEAS:
+
+-------
+Draw a really nice forest scene...
+Turn off depth test
+Then draw skyscrapers with far plane set really close, looks like
+skyscrapers are subsuming nature
+3d object wipe/Transition could be done by changing near/far planes<BR>
+---------
+
+have a loader class (Flux) that loads something, ie:
+
+done = Patchgrid->load();
+seattle.setDone( patchgrid->load );
+while( seattle.isDone() );
+
+-----------------
+
+change so that we have Object3d (bounding Volume?)
+Base things off that, rather than drawable
+
+
+---------------
+
+foreach( entities ) {
+    city->collide(ent);
+}
+
+foreach( entities ) {
+    foreach( entitities ) {
+       ent->collide(other);
+    }
+}
+
+</BODY>
+</HTML>

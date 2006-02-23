@@ -1,0 +1,14 @@
+Dave Lawrence - Code/Design
+Sam Norman - Art/Design
+
+Libraries used:
+ OpenGL
+ SDL (SDL, SDL_image)
+ LibJPG, LibPNG, zlib
+ MTX lib - matrix library
+
+Code nicked from:
+ Sound/Draw_Text/MD2 code - Cube
+ Frustum code - Slickworm
+ Probably other stuff or at least inspiration from other open source projects.
+

@@ -1,0 +1,70 @@
+#    Federal Monkey Patrol
+# by Dave Lawrence & Sam Norman
+
+################################
+###   INTRO. FILM LEADER     ###
+################################
+
+blank 000000
+transition fade 200
+picture data/images/leader/leader_4.jpg
+transition spin 800
+picture data/images/leader/leader_4.jpg 0 aaaaaa
+
+picture data/images/leader/leader_3.jpg
+transition spin 800
+picture data/images/leader/leader_3.jpg 0 aaaaaa
+
+picture data/images/leader/leader_2.jpg
+transition spin 800
+picture data/images/leader/leader_2.jpg 0 aaaaaa
+
+picture data/images/leader/leader_1.jpg
+transition spin 800
+picture data/images/leader/leader_1.jpg 0 aaaaaa
+
+blank 000000
+transition fade 200
+
+############# 
+
+storyteller 1_intro/01below_city_hall.shot
+storyteller 1_intro/02janitors_office1.shot
+storyteller 1_intro/03janitors_office2.shot
+
+#mission tutorial.xml
+
+
+
+storyteller 2_killmonkey/01police_hq.shot
+transition fade 1000
+storyteller 2_killmonkey/03lab.shot
+storyteller 2_killmonkey/04chief_office.shot
+
+
+
+storyteller 2_killmonkey/05slide_show.shot
+transition fade 1000
+blank 000000
+storyteller 2_killmonkey/06chief_office2.shot
+
+
+transition fade 1000
+blank 000000
+transition fade 1000
+
+#mission killmonkey.xml
+
+storyteller 3_rescue/all.shot
+
+transition fade 1000
+blank 000000
+transition fade 1000
+#mission rescue.xml
+
+storyteller 4_claw/all.shot
+
+transition fade 1000
+blank 000000
+transition fade 1000
+#mission claw.xml

@@ -1,0 +1,46 @@
+INPUT - 2 modes depending on plane's height
+
+1. Below top of skyscrapers (similar to rebel assault speeder)
+                 - UP/DOWN changes Height
+		 - LEFT/RIGHT = yaw
+  
+2. Above skyscraper tops (looking down) movement is similar to games like 1942
+   ie a top down shoot-em-up.
+
+- When you are flying above the skyscrapers you have very little danger to
+yourself and crashing into buildings.
+- It is SIGNIFICANTLY easier to kill monkeys with top down shoot-em-up mode
+- You can't rescue blondes in this mode.
+
+However, the longer you fly above the skyscrapers, a bar fills up, when it does
+The Giant Claw, a huge bird shadow appears over the city, you can dodge it but
+if the shadow covers you, you die.
+Thus pressure is put on you after a while to either evade (which is difficult)
+or fly down into the skyscrapers again, making shooting harder and putting
+yourself in danger of crashing into buildings.
+
+Some monkeys are innocent but your primitive technology to tell good ones and
+bad ones apart isn't 100% accurate.
+Sometimes in your haste you kill good ones by mistake. If another
+monkey sees you kill an innocent one, he will get angry and grow, and
+potentially kill.
+
+Little (mostly innocent) monkeys wander around the street.
+
+Medium monkeys attack you, grab blondes from windows and climb to the top of
+skyscrapers
+
+Large monkeys go on rampages and can stomp buildings.
+
+The game is about escalation. From the start you can be careful and kill only
+the bad monkeys, if you are sloppy the good monkeys will turn, the monkeys
+will grow and the violence will escalate. Eventually if you screw up you can
+have monkeys the size of buildings totally trashing the city.
+
+Tally of:
+blondes saved vs died
+innocent monkeys killed
+monkeys killed
+skyscrapers destroyed.
+
+

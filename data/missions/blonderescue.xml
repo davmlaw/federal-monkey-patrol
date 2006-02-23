@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<mission>
+
+<startconditions>
+  <height>5000</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+</startconditions>
+
+<constraints>
+  <maxheight>10000</maxheight>
+  <minheight>5000</minheight>
+  <maxspeed>100</maxspeed>
+  <minspeed>50</minspeed>
+</constraints>
+
+<outcomes>
+  <scenario>
+    <condition>
+       <stat name="blonde_rescues" op="gte" value="5" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>(blush) thankyou harlow!</message>
+    </result>
+  </scenario>
+
+</outcomes>
+
+</mission>

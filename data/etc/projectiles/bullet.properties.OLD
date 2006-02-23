@@ -1,0 +1,4 @@
+drawable=BB bullet.png
+lifetime=50
+air_resistance=0
+gravity=0
