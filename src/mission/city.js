@@ -238,6 +238,11 @@ class GeomBuilder {
   }
 }
 
+/** A GeomBuilder that throws its geometry away: the far (lite) versions of
+ *  buildings run the same code, so they use the same random numbers, but
+ *  send the detail they leave out here. */
+const NULL = { tri() {}, quad() {}, color: null, layer: 0 };
+
 // ======================================================= buildings: styling
 //
 // New since 2006 (which drew every block in win_brick.jpg and every
@@ -279,14 +284,16 @@ function weighted(rnd, options) {
 
 const SKYSCRAPER_FACADES = [[3, Facade.DECO_LIMESTONE], [3, Facade.SETBACK_BRICK], [2, Facade.TERRACOTTA], [2, Facade.DARK_BRICK], [2, Facade.BRICK_BUFF], [1, Facade.GOTHIC]];
 
-// Trim colours (vertex coloured, lit)
+// Trim colours (vertex coloured, lit). The metal crowns are kept greyish
+// (tarnished copper, dull brass) for the old-movie look (core/filmlook.js).
 const C = {
   roof: [0.36, 0.36, 0.37],
   stone: [0.80, 0.76, 0.68],
   darkstone: [0.42, 0.40, 0.38],
-  copper: [0.40, 0.64, 0.54],
-  steel: [0.84, 0.86, 0.90],
-  gold: [0.86, 0.70, 0.32],
+  copper: [0.46, 0.53, 0.50],
+  steel: [0.78, 0.79, 0.80],
+  steel2: [0.66, 0.67, 0.68],
+  gold: [0.68, 0.62, 0.48],
   wood: [0.42, 0.30, 0.20],
   iron: [0.22, 0.22, 0.24],
   tin: [0.30, 0.29, 0.27], // pressed-metal cornices
@@ -434,7 +441,7 @@ const GROUND_FLOOR = WS * 1.3; // shop fronts are taller
  * buildings along its longer side, as Manhattan's 25-100 foot lots were,
  * each one a walk-up, a loft or a taller apartment/office building.
  */
-function addBuilding(fb, trim, b) {
+function addBuilding(fb, trim, b, lite = false) {
   const rnd = styleRandom(b.x, b.z, 1);
   const alongX = b.w >= b.l;
   const span = alongX ? b.w : b.l;
@@ -453,11 +460,18 @@ function addBuilding(fb, trim, b) {
     const lot = alongX
       ? { x: b.x + c, z: b.z, hx: p / 2, hz: b.l / 2 }
       : { x: b.x, z: b.z + c, hx: b.w / 2, hz: p / 2 };
-    addMidrise(fb, trim, lot, b.h, styleRandom(lot.x, lot.z, 3));
+    addMidrise(fb, trim, lot, b.h, styleRandom(lot.x, lot.z, 3), lite);
   }
 }
 
-function addMidrise(fb, trim, lot, lotHeight, rnd) {
+/**
+ * One building. `lite` is the far level of detail: the walls go down to the
+ * pavement in one face (no storefront or lobby band) and there is no trim
+ * (cornices, bulkheads, water tanks).
+ */
+function addMidrise(fb, trimBuilder, lot, lotHeight, rnd, lite = false) {
+  const trim = lite ? NULL : trimBuilder;
+  const base0 = lite ? NULL : fb;
   const maxFloors = Math.max(3, Math.floor(lotHeight / WS));
   const kind = weighted(rnd, maxFloors >= 9
     ? [[35, 'walkup'], [30, 'loft'], [35, 'tall']]
@@ -483,18 +497,18 @@ function addMidrise(fb, trim, lot, lotHeight, rnd) {
   if (base === 'shops') {
     y = GROUND_FLOOR;
     const row = Math.floor(rnd.next() * BAYS);
-    faces(fb, ring, 0, y, { layer: Facade.STOREFRONT, ws: WS, v0: row + 1, v1: row, rnd });
+    faces(base0, ring, 0, y, { layer: Facade.STOREFRONT, ws: WS, v0: row + 1, v1: row, rnd });
   } else if (base === 'lobby') {
     y = 2 * WS;
     const v = rnd.chance(0.5) ? 0 : 2;
-    faces(fb, ring, 0, y, { layer: Facade.LOBBY, ws: WS, v0: v + 2, v1: v, rnd });
+    faces(base0, ring, 0, y, { layer: Facade.LOBBY, ws: WS, v0: v + 2, v1: v, rnd });
   }
   const yRef = y;
   // a setback of a few floors on top of some taller buildings
   const setback = kind === 'tall' && nFloors > 12 && rnd.chance(0.4) ? 2 + Math.floor(rnd.next() * 3) : 0;
   const top = yRef + (nFloors - (base === 'none' ? 0 : base === 'lobby' ? 2 : 1)) * WS;
   const body = top - setback * WS;
-  floors(fb, ring, y, body, layer, WS, yRef, rnd);
+  floors(fb, ring, lite ? 0 : y, body, layer, WS, yRef, rnd);
   const trimColor = kind === 'walkup' ? weighted(rnd, [[3, C.tin], [2, C.stone], [1, C.darkstone]]) : weighted(rnd, [[2, C.stone], [1, C.darkstone], [1, C.tin]]);
   roofCap(fb, ring, body);
   cornice(trim, lot.x, lot.z, lot.hx, lot.hz, body, WS * (kind === 'walkup' ? 0.55 : 0.4), WS * (kind === 'walkup' ? 0.22 : 0.14), trimColor);
@@ -532,7 +546,11 @@ export const Crown = { FLAT: 'flat', DECO: 'deco', EMPIRE: 'empire', CHRYSLER: '
  * width come from the 2006 generator (its stepped profile and spire);
  * everything else from styleRandom().
  */
-function addSkyscraper(fb, trim, sk) {
+function addSkyscraper(fb, trimBuilder, sk, lite = false) {
+  // lite (far) version: no lobby band or ledges, and a simple point in
+  // place of the metal crowns (on trimBuilder, the only trim drawn)
+  const trim = lite ? NULL : trimBuilder;
+  const base0 = lite ? NULL : fb;
   const rnd = styleRandom(sk.x, sk.z, 2);
   const ws = sk.windowSize;
   let H = 0;
@@ -546,7 +564,7 @@ function addSkyscraper(fb, trim, sk) {
       : [[4, Crown.FLAT], [3, Crown.DECO], [1, Crown.GOTHIC], [2, Crown.TEMPLE]]));
   const layer = crown === Crown.GOTHIC && rnd.chance(0.7) ? Facade.GOTHIC : weighted(rnd, SKYSCRAPER_FACADES);
   const lobby = 2 * ws; // floors are counted from the top of the lobby
-  const wall = (ring, y0, y1) => floors(fb, ring, Math.max(y0, lobby), y1, layer, ws, lobby, rnd);
+  const wall = (ring, y0, y1) => floors(fb, ring, lite ? y0 : Math.max(y0, lobby), y1, layer, ws, lobby, rnd);
   const trimColor = rnd.chance(0.6) ? C.stone : C.darkstone;
 
   // How much of the height goes on the crown, then the body's tiers.
@@ -572,7 +590,7 @@ function addSkyscraper(fb, trim, sk) {
     const ring = rect(sk.x, sk.z, t.half, t.half);
     if (y0 === 0) {
       const v = rnd.chance(0.5) ? 0 : 2;
-      faces(fb, ring, 0, lobby, { layer: Facade.LOBBY, ws, v0: v + 2, v1: v, rnd });
+      faces(base0, ring, 0, lobby, { layer: Facade.LOBBY, ws, v0: v + 2, v1: v, rnd });
     }
     wall(ring, y0, y1);
     roofCap(fb, ring, y1);
@@ -634,7 +652,7 @@ function addSkyscraper(fb, trim, sk) {
         const k = 0.9 - i * 0.15;
         const band = yy + crownH / n * 0.6;
         const y1 = yy + crownH / n;
-        const color = i & 1 ? C.steel : [0.7, 0.72, 0.76];
+        const color = i & 1 ? C.steel : C.steel2;
         block(trim, oct(k), yy, band, color, undefined, false);
         block(trim, oct(k), band, y1, color, oct(k - 0.12));
         yy = y1;
@@ -676,20 +694,41 @@ function addSkyscraper(fb, trim, sk) {
     }
     default:
   }
+  if (lite) crownProxy(trimBuilder, crown, sk, T, top, crownH, ws);
 }
 
-/** Vertical billboard pair of a CrossTree (billboards_addv), at right angles. */
-function addTree(gb, t) {
-  const hw = t.w * 0.5;
-  const hh = t.h * 0.5;
-  for (const rot of [t.rot, t.rot + 90]) {
-    const a = rot * Math.PI / 180;
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    const P = (x, y, u, v) => [t.x + x * c, t.y + y, t.z - x * s, u, v];
-    gb.quad(P(-hw, hh, 0, 0), P(-hw, -hh, 0, 1), P(hw, -hh, 1, 1), P(hw, hh, 1, 0));
+/** The far version of a crown: a tapering shaft and a point, the same
+ *  height as the real one. */
+function crownProxy(gb, crown, sk, T, top, crownH, ws) {
+  const oct = (k) => poly(sk.x, sk.z, T * k, 8);
+  const r = (k) => rect(sk.x, sk.z, T * k, T * k);
+  const needle = Math.max(crownH * 0.5, sk.spire * 0.5);
+  switch (crown) {
+    case Crown.EMPIRE:
+      block(gb, r(0.7), top, top + crownH * 0.6, C.stone, r(0.4), false);
+      point(gb, r(0.4), top + crownH * 0.6, top + crownH + needle, C.steel);
+      break;
+    case Crown.CHRYSLER:
+      block(gb, oct(0.95), top, top + ws + crownH * 0.4, C.steel, oct(0.6), false);
+      point(gb, oct(0.6), top + ws + crownH * 0.4, top + ws + crownH + needle, C.steel);
+      break;
+    case Crown.GOTHIC:
+      point(gb, r(0.9), top, top + ws * 0.5 + crownH + sk.spire, C.copper);
+      break;
+    case Crown.TEMPLE:
+      block(gb, r(0.8), top, top + crownH * 0.35, C.stone, r(0.8), false);
+      point(gb, r(0.75), top + crownH * 0.35, top + crownH, C.gold);
+      break;
+    default:
   }
 }
+
+// ===================================================================== trees
+//
+// Every tree is a camera-facing billboard: one quad per tree, instanced, and
+// turned to face the camera in the vertex shader. (2006 drew park trees as
+// CrossTrees, two billboards at right angles; the street trees added since
+// were 3D models.)
 
 /** A park's grass: SubdividedQuad(x, z, 2) with the texture once across. */
 function addPark(gb, p) {
@@ -700,6 +739,52 @@ function addPark(gb, p) {
 }
 
 const TREE_TEXTURES = ['tree1.png', 'tree2.png', 'tree3.png', 'tree_autumn.png'];
+const STREET_TREE_HEIGHT = 44;
+
+/** A unit quad centred on the origin, v = 0 at the top (flipY = false). */
+function billboardQuad() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0], 2));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  g.computeBoundingSphere();
+  return g;
+}
+
+/** Unlit cut-out material for instanced billboards: each instance's quad
+ *  is turned to face the camera, at the instance's position and scale. */
+function billboardMaterial(map) {
+  const mat = new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
+      vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      mvPosition.xy += position.xy * vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+      gl_Position = projectionMatrix * mvPosition;`);
+  };
+  return mat;
+}
+
+/** Instanced billboards, one InstancedMesh per tree texture. Each tree is
+ *  { x, y (centre), z, w, h, tex, g (tint, optional) }. */
+function buildTrees(trees, materials) {
+  const group = new THREE.Group();
+  const m = new THREE.Matrix4();
+  const col = new THREE.Color();
+  TREE_TEXTURES.forEach((_, tex) => {
+    const list = trees.filter((t) => t.tex === tex);
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(materials.treeQuad, materials.trees[tex], list.length);
+    list.forEach((t, i) => {
+      m.makeScale(t.w, t.h, 1).setPosition(t.x, t.y, t.z);
+      im.setMatrixAt(i, m);
+      const g = t.g ?? 1;
+      im.setColorAt(i, col.setRGB(g * 0.9, g, g * 0.85));
+    });
+    im.computeBoundingSphere();
+    group.add(im);
+  });
+  return group;
+}
 
 export async function loadCityMaterials() {
   const dir = 'data/images/city/';
@@ -714,9 +799,9 @@ export async function loadCityMaterials() {
     trim,
     grass: new THREE.MeshLambertMaterial({ map: grass }),
     ground: new THREE.MeshLambertMaterial({ map: groundTexture(), depthTest: false, depthWrite: false }),
-    trees: trees.map((map) => new THREE.MeshBasicMaterial({
-      map, side: THREE.DoubleSide, transparent: true, depthWrite: false, alphaTest: 0.05,
-    })),
+    trees: trees.map((map) => billboardMaterial(map)),
+    treeAspect: trees.map((t) => t.image.width / t.image.height),
+    treeQuad: billboardQuad(),
     furniture: streetFurniture(),
   };
 }
@@ -725,32 +810,32 @@ export async function loadCityMaterials() {
 
 // Where the curb is: the block's half-width in the ground texture.
 const CURB = (GROUND_BLOCK * BLOCKSIZE) / 2;
+const LAMP_GREEN = [0.13, 0.19, 0.15];
+const LANTERN = [1.0, 0.94, 0.72];
 
 /** Bishop's crook lamp post, arm along +x, about 9 m (45 units) tall. */
 function lampGeometry() {
   const gb = new GeomBuilder();
-  const green = [0.13, 0.19, 0.15];
+  const green = LAMP_GREEN;
   block(gb, poly(0, 0, 2.4, 6), 0, 5, green, poly(0, 0, 1.4, 6), false);
   block(gb, poly(0, 0, 0.8, 5), 5, 42, green, poly(0, 0, 0.5, 5), false);
   // the crook: up, over and down to the lantern
   block(gb, rect(1.6, 0, 1.8, 0.35), 41, 42.2, green);
   block(gb, rect(4.6, 0, 1.6, 0.35), 40.4, 41.4, green);
-  block(gb, poly(6.4, 0, 1.7, 4, Math.PI / 4), 34.5, 39.5, [1.0, 0.94, 0.72], poly(6.4, 0, 0.9, 4, Math.PI / 4), false);
+  block(gb, poly(6.4, 0, 1.7, 4, Math.PI / 4), 34.5, 39.5, LANTERN, poly(6.4, 0, 0.9, 4, Math.PI / 4), false);
   point(gb, poly(6.4, 0, 1.9, 4, Math.PI / 4), 39.5, 41, green);
   return gb.build({ colors: true });
 }
 
-/** A street tree: trunk and two lumps of canopy (coloured per instance). */
-function treeGeometry() {
+/** The far lamp post: a three-sided pole, the arm and the lantern
+ *  (16 triangles instead of 70). */
+function lampGeometryFar() {
   const gb = new GeomBuilder();
-  block(gb, poly(0, 0, 1.0, 5), 0, 16, [0.45, 0.36, 0.28], poly(0, 0, 0.7, 5), false);
-  const leaves = [0.38, 0.54, 0.27];
-  for (const [x, y, z, r, h] of [[0, 24, 0, 11, 16], [3, 32, -2, 7, 10]]) {
-    const ring = poly(x, z, r, 6);
-    point(gb, ring, y, y + h * 0.6, leaves);
-    gb.color = [0.28, 0.42, 0.22];
-    walls(gb, poly(x, z, r * 0.5, 6), ring, y - h * 0.4, y);
-  }
+  block(gb, poly(0, 0, 1.2, 3), 0, 42, LAMP_GREEN, poly(0, 0, 0.6, 3), false);
+  gb.color = LAMP_GREEN;
+  const P = (x, y) => [x, y, 0, 0, 0];
+  gb.quad(P(0, 42), P(0, 40.5), P(6.4, 40.5), P(6.4, 42));
+  block(gb, poly(6.4, 0, 1.6, 3), 34.5, 40.5, LANTERN, poly(6.4, 0, 1.0, 3), false);
   return gb.build({ colors: true });
 }
 
@@ -763,19 +848,48 @@ function hydrantGeometry() {
 
 function streetFurniture() {
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  return { lamp: lampGeometry(), tree: treeGeometry(), hydrant: hydrantGeometry(), mat };
+  return { lamp: lampGeometry(), lampFar: lampGeometryFar(), hydrant: hydrantGeometry(), mat };
 }
 
-/** Lamps on every block's curb (corners included), street trees and
- *  hydrants on some, as instanced meshes. */
-function buildFurniture(blocks, f) {
-  const lamps = [];
+/** The street trees along every leafy block's curbs (billboards). */
+function streetTrees(blocks, aspect) {
   const trees = [];
-  const hydrants = [];
-  const LAMP_EVERY = 3; // lamps per side, plus the corners
   for (const blk of blocks) {
     const rnd = styleRandom(blk.x, blk.z, 4);
     const leafy = blk.park || rnd.chance(0.55);
+    if (!leafy) continue;
+    const c = CURB - 7;
+    for (let side = 0; side < 4; side++) {
+      const a = (side * Math.PI) / 2;
+      const nx = Math.cos(a);
+      const nz = -Math.sin(a);
+      for (let i = 0; i < 6; i++) {
+        if (!blk.park && rnd.chance(0.35)) continue;
+        const t = -c + (2 * c * (i + 0.5)) / 6;
+        const tex = Math.floor(rnd.next() * 3); // (no autumn trees on the street)
+        const h = STREET_TREE_HEIGHT * rnd.range(0.8, 1.25);
+        trees.push({ x: blk.x + nx * c - nz * t, y: h / 2, z: blk.z + nz * c + nx * t, w: h * aspect[tex], h, tex, g: rnd.range(0.75, 1.1) });
+      }
+    }
+  }
+  return trees;
+}
+
+/**
+ * Lamps on every block's curb (corners included) and hydrants on some, as
+ * instanced meshes, in four groups (the quarters of the patch) so the level
+ * of detail can change a quarter at a time. Each quarter has the full lamp
+ * posts and hydrants (`near`), and simpler lamp posts (`far`) sharing their
+ * positions.
+ */
+function buildFurniture(blocks, f, cx, cz) {
+  const quarters = [0, 1, 2, 3].map((q) => ({
+    x: cx + ((q & 1) - 0.5) * CHILD_LENGTH / 2, z: cz + ((q >> 1) - 0.5) * CHILD_LENGTH / 2, lamps: [], hydrants: [],
+  }));
+  const LAMP_EVERY = 3; // lamps per side, plus the corners
+  for (const blk of blocks) {
+    const quarter = quarters[(blk.x > cx ? 1 : 0) + (blk.z > cz ? 2 : 0)];
+    const rnd = styleRandom(blk.x, blk.z, 5);
     const c = CURB - 3;
     // four sides: [outward normal angle, along-side direction]
     for (let side = 0; side < 4; side++) {
@@ -786,70 +900,97 @@ function buildFurniture(blocks, f) {
       const tz = nx;
       for (let i = 0; i <= LAMP_EVERY; i++) {
         const t = -c + (2 * c * i) / (LAMP_EVERY + 1);
-        lamps.push({ x: blk.x + nx * c + tx * t, z: blk.z + nz * c + tz * t, rot: a });
-      }
-      if (leafy) {
-        for (let i = 0; i < 6; i++) {
-          if (!blk.park && rnd.chance(0.35)) continue;
-          const t = -c + (2 * c * (i + 0.5)) / 6;
-          trees.push({ x: blk.x + nx * (c - 4) + tx * t, z: blk.z + nz * (c - 4) + tz * t, rot: rnd.next() * 6.3, s: rnd.range(0.8, 1.25), g: rnd.range(0.75, 1.15) });
-        }
+        quarter.lamps.push({ x: blk.x + nx * c + tx * t, z: blk.z + nz * c + tz * t, rot: a });
       }
       if (rnd.chance(0.4)) {
         const t = rnd.range(-0.8, 0.8) * c;
-        hydrants.push({ x: blk.x + nx * (c - 2) + tx * t, z: blk.z + nz * (c - 2) + tz * t, rot: 0 });
+        quarter.hydrants.push({ x: blk.x + nx * (c - 2) + tx * t, z: blk.z + nz * (c - 2) + tz * t, rot: 0 });
       }
     }
   }
-  const group = new THREE.Group();
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
-  const make = (geom, list, color) => {
-    if (!list.length) return;
+  const one = new THREE.Vector3(1, 1, 1);
+  const make = (geom, list) => {
     const im = new THREE.InstancedMesh(geom, f.mat, list.length);
     list.forEach((p, i) => {
       q.setFromAxisAngle(up, p.rot);
-      const s = p.s ?? 1;
-      m.compose(new THREE.Vector3(p.x, 0, p.z), q, new THREE.Vector3(s, s, s));
-      im.setMatrixAt(i, m);
-      if (color) im.setColorAt(i, color(p));
+      im.setMatrixAt(i, m.compose(new THREE.Vector3(p.x, 0, p.z), q, one));
     });
     im.computeBoundingSphere();
-    group.add(im);
+    return im;
   };
-  make(f.lamp, lamps);
-  make(f.tree, trees, (p) => new THREE.Color(p.g * 0.9, p.g, p.g * 0.8));
-  make(f.hydrant, hydrants);
+  return quarters.filter((qt) => qt.lamps.length).map((qt) => {
+    const group = new THREE.Group();
+    const near = new THREE.Group();
+    near.add(make(f.lamp, qt.lamps));
+    if (qt.hydrants.length) near.add(make(f.hydrant, qt.hydrants));
+    const far = new THREE.InstancedMesh(f.lampFar, f.mat, qt.lamps.length);
+    far.instanceMatrix = near.children[0].instanceMatrix; // the same lamps
+    far.boundingSphere = near.children[0].boundingSphere;
+    group.add(near, far);
+    group.userData = { x: qt.x, z: qt.z, near, far };
+    return group;
+  });
+}
+
+// ===================================================== patches and their LOD
+
+/** Everything a patch always has: grass, trees, and the far (lite)
+ *  version of its buildings. */
+export function buildPatchBase(data, materials) {
+  const group = new THREE.Group();
+  const add = (parent, geom, mat) => {
+    if (!geom) return null;
+    const mesh = new THREE.Mesh(geom, mat);
+    parent.add(mesh);
+    return mesh;
+  };
+  const grass = new GeomBuilder();
+  for (const p of data.parks) addPark(grass, p);
+  add(group, grass.build(), materials.grass);
+
+  const parkTrees = data.trees.map((t) => ({ ...t, w: t.h * materials.treeAspect[t.tex] }));
+  const trees = buildTrees(parkTrees.concat(streetTrees(data.blocks, materials.treeAspect)), materials);
+  group.add(trees);
+
+  const far = new THREE.Group();
+  const fb = new GeomBuilder();
+  const trim = new GeomBuilder();
+  for (const b of data.buildings) addBuilding(fb, trim, b, true);
+  for (const s of data.skyscrapers) addSkyscraper(fb, trim, s, true);
+  add(far, fb.build({ layers: true }), materials.facades);
+  add(far, trim.build({ colors: true }), materials.trim);
+  group.add(far);
+  group.userData = { trees, far, near: null };
   return group;
 }
 
-/** Build the meshes for one generated patch. */
-export function buildPatchMeshes(data, materials) {
+/** The near (full detail) version of a patch's buildings, with the street
+ *  furniture. */
+export function buildPatchNear(data, materials, cx, cz) {
   const group = new THREE.Group();
   const fb = new GeomBuilder();
   const trim = new GeomBuilder();
   for (const b of data.buildings) addBuilding(fb, trim, b);
   for (const s of data.skyscrapers) addSkyscraper(fb, trim, s);
-  const grass = new GeomBuilder();
-  for (const p of data.parks) addPark(grass, p);
-  const trees = TREE_TEXTURES.map(() => new GeomBuilder());
-  for (const t of data.trees) addTree(trees[t.tex], t);
-
-  const add = (geom, mat, order) => {
-    if (!geom) return null;
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.renderOrder = order;
-    group.add(mesh);
-    return mesh;
-  };
-  add(grass.build(), materials.grass, 0);
-  add(fb.build({ layers: true }), materials.facades, 0);
-  group.userData.trim = add(trim.build({ colors: true }), materials.trim, 0);
-  trees.forEach((tb, i) => add(tb.build({ normals: false }), materials.trees[i], 3));
-  group.userData.furniture = buildFurniture(data.blocks, materials.furniture);
-  group.add(group.userData.furniture);
+  const facades = fb.build({ layers: true });
+  if (facades) group.add(new THREE.Mesh(facades, materials.facades));
+  const t = trim.build({ colors: true });
+  if (t) group.add(new THREE.Mesh(t, materials.trim));
+  group.userData.furniture = buildFurniture(data.blocks, materials.furniture, cx, cz);
+  group.add(...group.userData.furniture);
   return group;
+}
+
+/** Free a group's own geometry (not the shared furniture/tree geometry). */
+function disposeGroup(group, materials) {
+  const shared = new Set([materials.treeQuad, materials.furniture.lamp, materials.furniture.lampFar, materials.furniture.hydrant]);
+  group.traverse((o) => {
+    if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
+    if (o.isInstancedMesh) o.dispose();
+  });
 }
 
 /**
@@ -887,12 +1028,28 @@ export function buildGround(materials) {
 
 // ================================================================ CityGrid
 
-// Cornices, water towers and crowns are left off patches further than this,
-// and lamps and street trees off patches further than FURNITURE_DISTANCE or
-// when the camera is too high to see them.
-const TRIM_DISTANCE = 4000;
+// Level of detail, by distance from the camera to the nearest point of a
+// patch (or a quarter of one, for the street furniture):
+// - buildings: full detail (storefronts and lobbies, cornices, rooftop
+//   bulkheads and water tanks, metal crowns) nearer than NEAR_DISTANCE,
+//   otherwise the lite version (plain walls down to the street, a point for
+//   a crown). The full version is built when a patch first comes near, and
+//   thrown away again once it is NEAR_KEEP further out.
+// - lamp posts and hydrants: full nearer than LAMP_DISTANCE, simple lamp
+//   posts only out to FURNITURE_DISTANCE, nothing beyond (or when the
+//   camera is higher than FURNITURE_MAX_HEIGHT).
+// - trees (billboards, two triangles each): out to TREE_DISTANCE.
+const NEAR_DISTANCE = 2500;
+const NEAR_KEEP = 1500;
+const LAMP_DISTANCE = 500;
 const FURNITURE_DISTANCE = 1800;
 const FURNITURE_MAX_HEIGHT = 2500;
+const TREE_DISTANCE = 6000;
+
+/** Distance from (x, z) to the nearest point of a square. */
+function boxDistance(x, z, cx, cz, half) {
+  return Math.hypot(Math.max(0, Math.abs(x - cx) - half), Math.max(0, Math.abs(z - cz) - half));
+}
 
 /**
  * PatchGrid: an 8x8 grid of patches kept centred on the camera. When the
@@ -917,8 +1074,9 @@ export class CityGrid {
     const x = (i + 0.5) * CHILD_LENGTH;
     const z = (j + 0.5) * CHILD_LENGTH;
     const data = generatePatch(x, z);
-    const meshes = buildPatchMeshes(data, this.materials);
-    meshes.userData.centre = { x, z };
+    const patch = buildPatchBase(data, this.materials);
+    patch.userData.centre = { x, z };
+    patch.userData.data = data;
     // tallest roof per block, for maxHeightNear()
     const tops = new Map();
     const note = (bx, bz, h) => {
@@ -931,18 +1089,37 @@ export class CityGrid {
       for (let k = 0; k < sk.step.length; k += 2) h += sk.step[k] * sk.windowSize;
       note(sk.x, sk.z, h * 1.15 + sk.spire);
     }
-    meshes.userData.tops = tops;
-    this.group.add(meshes);
-    this.patches.set(CityGrid.key(i, j), meshes);
+    patch.userData.tops = tops;
+    this.group.add(patch);
+    this.patches.set(CityGrid.key(i, j), patch);
+    return patch;
   }
 
-  /** The initial city, in the C++ generation order (row-major, from +Z). */
+  /** Build the full-detail version of a patch. */
+  addNear(patch) {
+    const { data, centre } = patch.userData;
+    patch.userData.near = buildPatchNear(data, this.materials, centre.x, centre.z);
+    patch.add(patch.userData.near);
+  }
+
+  dropNear(patch) {
+    const { near } = patch.userData;
+    if (!near) return;
+    patch.remove(near);
+    disposeGroup(near, this.materials);
+    patch.userData.near = null;
+  }
+
+  /** The initial city, in the C++ generation order (row-major, from +Z),
+   *  with full detail round the start (the origin). */
   async generate(onProgress) {
     const half = PATCHES / 2;
     let done = 0;
     for (let row = 0; row < PATCHES; row++) {
       for (let col = 0; col < PATCHES; col++) {
-        this.addPatch(col - half, half - 1 - row);
+        const patch = this.addPatch(col - half, half - 1 - row);
+        const { x, z } = patch.userData.centre;
+        if (boxDistance(0, 0, x, z, CHILD_LENGTH / 2) < NEAR_DISTANCE) this.addNear(patch);
         onProgress(++done / (PATCHES * PATCHES));
         await new Promise((r) => requestAnimationFrame(r)); // let the load bar draw
       }
@@ -952,8 +1129,8 @@ export class CityGrid {
   /**
    * PatchGrid::setPosition(camera position). New: patches entirely beyond
    * `visible` (the fog's far end, where they'd be drawn in the fog colour
-   * anyway) are hidden, and the rooftop detail of patches beyond
-   * TRIM_DISTANCE.
+   * anyway) are hidden, and the level of detail is chosen (see above).
+   * At most one patch is generated, and one given full detail, per frame.
    */
   update(pos, visible = Infinity) {
     this.pos = pos;
@@ -967,10 +1144,10 @@ export class CityGrid {
       for (let i = cx - half; i < cx + half; i++) {
         for (let j = cz - half; j < cz + half; j++) wanted.add(CityGrid.key(i, j));
       }
-      for (const [k, meshes] of this.patches) {
+      for (const [k, patch] of this.patches) {
         if (!wanted.has(k)) {
-          this.group.remove(meshes);
-          meshes.traverse((o) => { if (!o.isInstancedMesh) o.geometry?.dispose(); else o.dispose(); });
+          this.group.remove(patch);
+          disposeGroup(patch, this.materials);
           this.patches.delete(k);
         }
       }
@@ -983,14 +1160,35 @@ export class CityGrid {
       const [i, j] = this.queue.shift();
       this.addPatch(i, j);
     }
-    const reach = CHILD_LENGTH * Math.SQRT1_2; // centre to corner
-    for (const meshes of this.patches.values()) {
-      const { x, z } = meshes.userData.centre;
-      const d = Math.max(0, Math.hypot(x - pos.x, z - pos.z) - reach);
-      meshes.visible = d < visible;
-      if (meshes.userData.trim) meshes.userData.trim.visible = d < TRIM_DISTANCE;
-      meshes.userData.furniture.visible = d < FURNITURE_DISTANCE && pos.y < FURNITURE_MAX_HEIGHT;
+    // Furniture is judged from a little above the street, so it goes when
+    // the camera is high as well as far.
+    const lift = Math.max(0, pos.y - 150);
+    const furnitureOn = pos.y < FURNITURE_MAX_HEIGHT;
+    let upgrade = null;
+    let upgradeD = Infinity;
+    for (const patch of this.patches.values()) {
+      const u = patch.userData;
+      const d = boxDistance(pos.x, pos.z, u.centre.x, u.centre.z, CHILD_LENGTH / 2);
+      patch.visible = d < visible;
+      u.trees.visible = d < TREE_DISTANCE;
+      if (!u.near && d < NEAR_DISTANCE && d < upgradeD) {
+        upgrade = patch;
+        upgradeD = d;
+      } else if (u.near && d > NEAR_DISTANCE + NEAR_KEEP) {
+        this.dropNear(patch);
+      }
+      const near = u.near && d < NEAR_DISTANCE;
+      u.far.visible = !near;
+      if (!u.near) continue;
+      u.near.visible = near;
+      for (const q of u.near.userData.furniture) {
+        const fd = Math.hypot(boxDistance(pos.x, pos.z, q.userData.x, q.userData.z, CHILD_LENGTH / 4), lift);
+        q.visible = furnitureOn && fd < FURNITURE_DISTANCE;
+        q.userData.near.visible = fd < LAMP_DISTANCE;
+        q.userData.far.visible = !q.userData.near.visible;
+      }
     }
+    if (upgrade) this.addNear(upgrade);
   }
 
   /** The tallest building top within `radius` of (x, z). */
@@ -999,8 +1197,8 @@ export class CityGrid {
     const r = Math.ceil(radius / BLOCKSIZE);
     const bi = Math.floor(x / BLOCKSIZE);
     const bj = Math.floor(z / BLOCKSIZE);
-    for (const meshes of this.patches.values()) {
-      const { tops } = meshes.userData;
+    for (const patch of this.patches.values()) {
+      const { tops } = patch.userData;
       for (let i = bi - r; i <= bi + r; i++) {
         for (let j = bj - r; j <= bj + r; j++) h = Math.max(h, tops.get(CityGrid.key(i, j)) ?? 0);
       }
@@ -1009,7 +1207,7 @@ export class CityGrid {
   }
 
   dispose() {
-    // (the shared street furniture geometry is kept for the next mission)
-    this.group.traverse((o) => { if (!o.isInstancedMesh) o.geometry?.dispose(); });
+    // (the shared furniture and tree geometry is kept for the next mission)
+    disposeGroup(this.group, this.materials);
   }
 }

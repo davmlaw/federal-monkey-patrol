@@ -82,6 +82,7 @@ html, body {
 .keys, .foot { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
 
 .foot a { color: var(--muted); }
+.warn { color: #e8b04a; font-size: 13px; margin: 8px 0 0; }
 
 kbd {
   font-family: ui-monospace, Menlo, monospace;

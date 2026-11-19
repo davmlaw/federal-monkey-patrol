@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { Batch2D } from './draw2d.js';
+import './filmlook.js'; // patches three's shader chunks before anything compiles
 
 // The ortho 2D coordinate space of the original: 1.0 x 0.75, origin centred.
 export const ORTHO_W = 1.0;
@@ -12,13 +13,27 @@ const BASE_W = 640;
 
 THREE.ColorManagement.enabled = false;
 
+/** The GPU (or software rasteriser) behind a WebGL context, if it says. */
+function gpuName(gl) {
+  const ext = gl.getExtension('WEBGL_debug_renderer_info');
+  return String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || 'unknown');
+}
+
 class Display {
   init(canvas) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    // Ask for the fast GPU on machines that have two (laptops). WebGL is
+    // always GPU accelerated unless the browser has fallen back to a
+    // software rasteriser (GPU blocklisted, hardware acceleration switched
+    // off, a VM, a headless browser): see softwareRenderer().
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
     this.renderer.autoClear = false;
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.gpu = gpuName(this.renderer.getContext());
+    this.software = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i.test(this.gpu);
+    console.log(`WebGL renderer: ${this.gpu}${this.software ? ' (software rendering!)' : ''}`);
+    // A software rasteriser is slow per pixel: don't render at 2x as well.
+    this.renderer.setPixelRatio(this.software ? 1 : Math.min(window.devicePixelRatio || 1, 2));
     this.g = new Batch2D(this.renderer);
     this.target = null;
     this.targets = [];

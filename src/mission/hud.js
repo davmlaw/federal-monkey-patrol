@@ -6,12 +6,14 @@ import { Container2D, Drawable2D, Image, LEFT, Quad, Text2D, Transitional2D, tex
 import { loadProperties, hexcolor } from '../core/settings.js';
 import { MTRand } from '../core/mtrand.js';
 import { FOG_COLOR } from './world.js';
+import { filmColor } from '../core/filmlook.js';
 
-/** A quad pushed to the far plane with fog on: i.e. a fog-coloured screen. */
+/** A quad pushed to the far plane with fog on: i.e. a fog-coloured screen
+ *  (graded like the 3D scene, so the horizon matches). */
 export class FogPlane extends Quad {
   constructor() {
     super(ORTHO_W, ORTHO_H);
-    this.setColor(...FOG_COLOR);
+    this.setColor(...filmColor(FOG_COLOR));
   }
 }
 

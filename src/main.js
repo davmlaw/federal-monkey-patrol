@@ -117,6 +117,8 @@ function showMenu({ ended = false } = {}) {
         M or Tab: switch flying mode &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
         In the story, tap, click, Space or Enter for the next line.
         On a touch screen, use the on-screen stick, throttle and buttons.</p>
+      ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
+        Turn on hardware acceleration in the browser's settings (or check chrome://gpu).</p>` : ''}
       <p class="foot"><a href="https://github.com/davmlaw/federal-monkey-patrol">Source on GitHub</a> &middot; GPL v2</p>
     </div>`;
   overlay.hidden = false;
