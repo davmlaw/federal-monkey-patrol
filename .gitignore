@@ -1,0 +1,24 @@
+# Build output
+*.o
+*.d
+kongtest
+gmon.out
+
+# Visual Studio
+win32/Debug/
+win32/Release/
+*.ncb
+*.suo
+*.user
+*.pdb
+*.ilk
+*.idb
+bin/
+
+# Generated docs
+doc/html/
+
+# Editor / OS junk
+*~
+.DS_Store
+._*
