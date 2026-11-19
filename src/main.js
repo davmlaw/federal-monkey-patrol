@@ -15,6 +15,8 @@ import { GameManager } from './game/manager.js';
 import { stopMusic } from './game/simple.js';
 import { gamestats } from './mission/stats.js';
 import { Tuner } from './tuner.js';
+import { TouchControls } from './core/touch.js';
+import { Mission } from './mission/mission.js';
 
 const GAMES = [
   { file: 'data/federal_monkey_patrol.game', title: 'Federal Monkey Patrol', note: 'The story: film leader, intro and the four chapters (missions were commented out in 2006)' },
@@ -30,6 +32,7 @@ const canvas = document.getElementById('screen');
 let game = null;
 let tuner = null;
 let inputmanager = null;
+let touch = null;
 let running = false;
 
 function gameUrl(file) {
@@ -49,8 +52,9 @@ function showMenu({ ended = false } = {}) {
           <li><a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen ? 'chosen' : ''}">
             <span class="t">${g.title}</span><span class="n">${g.note}</span></a></li>`).join('')}
       </ul>
-      <p class="keys">Arrow keys: fly &middot; Space / Enter and Ctrl: fire &middot;
-        Insert or <kbd>\`</kbd>: tuner &middot; Esc: quit</p>
+      <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
+        M or Tab: switch flying mode &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: quit.
+        On a touch screen, use the on-screen stick, throttle and buttons.</p>
       <p class="foot"><a href="https://github.com/davmlaw/federal-monkey-patrol">Source on GitHub</a> &middot; GPL v2</p>
     </div>`;
   overlay.hidden = false;
@@ -82,6 +86,8 @@ async function start(file) {
   }
   const input = new Input();
   inputmanager = new InputManager(input);
+  touch = new TouchControls(input);
+  inputmanager.addDevice(touch);
   running = true;
   console.log('---------- BEGIN MAIN LOOP ----------');
   let last = performance.now();
@@ -90,10 +96,15 @@ async function start(file) {
     // Timer::tick(), capped so a backgrounded tab doesn't skip whole scenes
     const msecs = Math.min(250, Math.max(0, Math.round(now - last)));
     last = now;
-    inputmanager.update();
+    inputmanager.update(msecs);
     display.beginFrame();
     try {
       game.play(display, msecs, input);
+      // on-screen flight controls only while flying a mission
+      const c = game.currentComponent();
+      const flying = c instanceof Mission && c.loaded && !c.loadError && !!c.player;
+      touch.setVisible(flying && !tuner?.visible);
+      if (flying) touch.setMode(c.player.modeName());
     } catch (e) {
       console.error('Uncaught Exception.', e);
       game.status = Status.QUIT;
@@ -118,6 +129,8 @@ function stop() {
   tuner = null;
   inputmanager?.dispose();
   inputmanager = null;
+  touch?.dispose();
+  touch = null;
 }
 
 display.init(canvas);

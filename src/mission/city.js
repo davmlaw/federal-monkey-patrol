@@ -195,17 +195,6 @@ export function generatePatch(cx, cz) {
   return out;
 }
 
-/** Patch (col,row) centres, in the order the PatchGrid generated them. */
-export function patchCentres() {
-  const list = [];
-  for (let row = 0; row < PATCHES; row++) {
-    for (let col = 0; col < PATCHES; col++) {
-      list.push({ x: (col - (PATCHES - 1) / 2) * CHILD_LENGTH, z: ((PATCHES - 1) / 2 - row) * CHILD_LENGTH });
-    }
-  }
-  return list;
-}
-
 // ================================================================= geometry
 
 class GeomBuilder {
@@ -400,4 +389,80 @@ export function buildGround(materials) {
   const mesh = new THREE.Mesh(gb.build(), materials.ground);
   mesh.renderOrder = -1;
   return mesh;
+}
+
+// ================================================================ CityGrid
+
+/**
+ * PatchGrid: an 8x8 grid of patches kept centred on the camera. When the
+ * camera crosses into another patch, the row/column that falls off one side
+ * is dropped and a new one is generated on the other (one patch per frame).
+ * Patch (i, j) is centred on ((i + 0.5), (j + 0.5)) * CHILD_LENGTH.
+ */
+export class CityGrid {
+  constructor(materials) {
+    this.materials = materials;
+    this.group = new THREE.Group();
+    this.ground = buildGround(materials);
+    this.group.add(this.ground);
+    this.patches = new Map();
+    this.queue = [];
+    this.centre = { x: 0, z: 0 };
+  }
+
+  static key(i, j) { return `${i},${j}`; }
+
+  addPatch(i, j) {
+    const data = generatePatch((i + 0.5) * CHILD_LENGTH, (j + 0.5) * CHILD_LENGTH);
+    const meshes = buildPatchMeshes(data, this.materials);
+    this.group.add(meshes);
+    this.patches.set(CityGrid.key(i, j), meshes);
+  }
+
+  /** The initial city, in the C++ generation order (row-major, from +Z). */
+  async generate(onProgress) {
+    const half = PATCHES / 2;
+    let done = 0;
+    for (let row = 0; row < PATCHES; row++) {
+      for (let col = 0; col < PATCHES; col++) {
+        this.addPatch(col - half, half - 1 - row);
+        onProgress(++done / (PATCHES * PATCHES));
+        await new Promise((r) => requestAnimationFrame(r)); // let the load bar draw
+      }
+    }
+  }
+
+  /** PatchGrid::setPosition(camera position) */
+  update(pos) {
+    const cx = Math.round(pos.x / CHILD_LENGTH);
+    const cz = Math.round(pos.z / CHILD_LENGTH);
+    if (cx !== this.centre.x || cz !== this.centre.z) {
+      this.centre = { x: cx, z: cz };
+      this.ground.position.set(cx * CHILD_LENGTH, 0, cz * CHILD_LENGTH);
+      const half = PATCHES / 2;
+      const wanted = new Set();
+      for (let i = cx - half; i < cx + half; i++) {
+        for (let j = cz - half; j < cz + half; j++) wanted.add(CityGrid.key(i, j));
+      }
+      for (const [k, meshes] of this.patches) {
+        if (!wanted.has(k)) {
+          this.group.remove(meshes);
+          meshes.traverse((o) => o.geometry?.dispose());
+          this.patches.delete(k);
+        }
+      }
+      this.queue = [...wanted].filter((k) => !this.patches.has(k)).map((k) => k.split(',').map(Number));
+    }
+    if (this.queue.length) {
+      // nearest missing patch first
+      const d = ([i, j]) => Math.hypot((i + 0.5) * CHILD_LENGTH - pos.x, (j + 0.5) * CHILD_LENGTH - pos.z);
+      this.queue.sort((a, b) => d(a) - d(b));
+      const [i, j] = this.queue.shift();
+      this.addPatch(i, j);
+    }
+  }
+
+  dispose() {
+    this.group.traverse((o) => o.geometry?.dispose());
+  }
 }

@@ -1,6 +1,5 @@
 // Port of game/mission/mission.cpp and missionbuilder.cpp.
 
-import * as THREE from 'three';
 import { ORTHO_H, ORTHO_W } from '../core/display.js';
 import { Container2D, RIGHT, TOP } from '../core/draw2d.js';
 import { fetchText } from '../core/assets.js';
@@ -10,7 +9,7 @@ import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.js';
 import { gamestats } from './stats.js';
 import { makeCameraMan, Player, World } from './world.js';
 import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LoadBar } from './hud.js';
-import { buildGround, buildPatchMeshes, generatePatch, loadCityMaterials, patchCentres } from './city.js';
+import { CityGrid, loadCityMaterials } from './city.js';
 
 /** game/mission/giantclaw.cpp. Built from <claw>, but Mission::update()'s
  *  call to update() was commented out in 2006, so it never changes. */
@@ -76,17 +75,9 @@ export class Mission extends GameComponent {
 
     // World(): the PatchGrid city, generated patch by patch behind the load bar
     const materials = await loadCityMaterials();
-    const city = new THREE.Group();
-    city.add(buildGround(materials));
-    const centres = patchCentres();
-    let done = 0;
-    for (const c of centres) {
-      const data = generatePatch(c.x, c.z);
-      city.add(buildPatchMeshes(data, materials));
-      this.progress = ++done / centres.length;
-      await new Promise((r) => requestAnimationFrame(r)); // let the load bar draw
-    }
-    this.world = new World(city);
+    const grid = new CityGrid(materials);
+    await grid.generate((p) => { this.progress = p; });
+    this.world = new World(grid);
     this.world.addEntity(this.player.entity);
     gamestats.reset();
   }
@@ -140,7 +131,7 @@ export class Mission extends GameComponent {
     // (2006: fake MONKEY_DEATHS/BLONDE_RESCUES and the claw update were
     // commented out here.)
     this.countdowntimer?.update(gamestats.get(1 /* GAME_SECONDS */));
-    if (input) this.player.read(input);
+    if (input) this.player.read(input, this.speedFor(input.throttle));
     this.constraints?.restrict(this.player);
     this.world.update(msecs);
   }
@@ -148,13 +139,19 @@ export class Mission extends GameComponent {
   draw(display, msecs) {
     display.draw2d(this.fogplane);
     display.clearDepth();
-    this.cameraman.lookAt(this.player.entity.object);
+    this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs);
     this.world.draw(display, this.cameraman.getCamera());
     display.draw2d(this.hud);
     if (msecs) {
       this.fps.update(msecs);
       display.draw2d(fpsOverlay(this.fps));
     }
+  }
+
+  /** Throttle (0..1) to speed, within the mission's speed constraints. */
+  speedFor(throttle) {
+    const c = this.constraints ?? new Constraints();
+    return c.minSpeed + throttle * (c.maxSpeed - c.minSpeed);
   }
 
   dispose() {
