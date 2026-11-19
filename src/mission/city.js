@@ -201,11 +201,15 @@ class GeomBuilder {
   constructor() {
     this.pos = [];
     this.uv = [];
+    this.col = [];
+    this.color = [1, 1, 1]; // vertex colour for what's added next
   }
 
   tri(a, b, c) {
     this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     this.uv.push(a[3], a[4], b[3], b[4], c[3], c[4]);
+    const [r, g, bl] = this.color;
+    this.col.push(r, g, bl, r, g, bl, r, g, bl);
   }
 
   /** quad a-b-c-d anticlockwise seen from the front */
@@ -214,21 +218,180 @@ class GeomBuilder {
     this.tri(a, c, d);
   }
 
-  build({ normals = true } = {}) {
+  build({ normals = true, colors = false } = {}) {
     if (!this.pos.length) return null;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    if (colors) g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     if (normals) g.computeVertexNormals(); // non-indexed: flat face normals
     g.computeBoundingSphere();
     return g;
   }
 }
 
-function addBuilding(gb, b) {
+// ======================================================= buildings: styling
+//
+// New since 2006 (which drew every block in win_brick.jpg and every
+// skyscraper as a ziggurat that tapered to a point): wall textures, cornices,
+// rooftop water towers, and skyscrapers in the style of 1910s-30s New York.
+// The 2006 generator still decides where every building goes and how tall
+// and wide it is (the MTRand sequence is untouched); the styling below uses
+// its own random numbers, hashed from the building's position, so a given
+// building always looks the same.
+
+/** mulberry32, seeded from a position: deterministic per building. */
+function styleRandom(x, z, salt = 0) {
+  let a = (Math.imul(Math.round(x * 8), 73856093) ^ Math.imul(Math.round(z * 8), 19349663) ^ Math.imul(salt + 1, 83492791)) >>> 0;
+  const next = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  next();
+  return {
+    next,
+    range: (lo, hi) => lo + next() * (hi - lo),
+    pick: (arr) => arr[Math.floor(next() * arr.length)],
+    chance: (p) => next() < p,
+  };
+}
+
+/** Weighted pick from [[weight, value], ...] */
+function weighted(rnd, options) {
+  let r = rnd.next() * options.reduce((t, o) => t + o[0], 0);
+  for (const [w, v] of options) {
+    r -= w;
+    if (r < 0) return v;
+  }
+  return options[options.length - 1][1];
+}
+
+// Wall textures (data/images/city/); the index is the wall mesh per patch.
+const WALL_TEXTURES = ['win_brick.jpg', 'win_redbrick.jpg', 'win_concrete.jpg', 'win_concrete_vstrip.jpg', 'win_dark_gray.jpg', 'win_gray.jpg'];
+const Wall = { BRICK: 0, REDBRICK: 1, CONCRETE: 2, VSTRIP: 3, DARKGRAY: 4, GRAY: 5 };
+const BUILDING_WALLS = [[5, Wall.BRICK], [3, Wall.REDBRICK], [2, Wall.CONCRETE], [1, Wall.DARKGRAY]];
+const SKYSCRAPER_WALLS = [[3, Wall.BRICK], [3, Wall.CONCRETE], [3, Wall.VSTRIP], [2, Wall.DARKGRAY], [1, Wall.GRAY]];
+
+// Trim colours (vertex coloured, lit)
+const C = {
+  roof: [0.36, 0.36, 0.37],
+  stone: [0.80, 0.76, 0.68],
+  darkstone: [0.42, 0.40, 0.38],
+  copper: [0.40, 0.64, 0.54],
+  steel: [0.84, 0.86, 0.90],
+  gold: [0.86, 0.70, 0.32],
+  wood: [0.42, 0.30, 0.20],
+  iron: [0.22, 0.22, 0.24],
+};
+
+/** Corners of a w x l rectangle, in the winding the walls and caps use. */
+function rect(cx, cz, hx, hz) {
+  return [[cx - hx, cz + hz], [cx + hx, cz + hz], [cx + hx, cz - hz], [cx - hx, cz - hz]];
+}
+
+/** Corners of a regular polygon (sides >= 3), same winding as rect(). */
+function poly(cx, cz, r, sides, phase = Math.PI / sides) {
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = phase + (i / sides) * Math.PI * 2 - Math.PI / 2;
+    out.push([cx + r * Math.sin(a), cz + r * Math.cos(a)]);
+  }
+  return out;
+}
+
+/**
+ * Walls between two rings of corners (same count), from y0 to y1: straight
+ * walls when the rings match, a tapering frustum otherwise. With a window
+ * size, the walls are textured a whole number of windows across and one
+ * floor per window, v=0 at the top as in the 2006 code.
+ */
+function walls(gb, lower, upper, y0, y1, ws = 0) {
+  const n = lower.length;
+  for (let i = 0; i < n; i++) {
+    const a0 = lower[i];
+    const b0 = lower[(i + 1) % n];
+    const a1 = upper[i];
+    const b1 = upper[(i + 1) % n];
+    let u = 0;
+    let v0 = 0;
+    let v1 = 0;
+    if (ws) {
+      u = Math.max(1, Math.round(Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) / ws));
+      v0 = -y0 / ws;
+      v1 = -y1 / ws;
+    }
+    gb.quad([a1[0], y1, a1[1], 0, v1], [a0[0], y0, a0[1], 0, v0], [b0[0], y0, b0[1], u, v0], [b1[0], y1, b1[1], u, v1]);
+  }
+}
+
+/** Flat cap over a ring of corners at height y, facing up (or down). */
+function cap(gb, ring, y, down = false) {
+  for (let i = 1; i + 1 < ring.length; i++) {
+    const a = [ring[0][0], y, ring[0][1], 0, 0];
+    const b = [ring[i][0], y, ring[i][1], 0, 0];
+    const c = [ring[i + 1][0], y, ring[i + 1][1], 0, 0];
+    if (down) gb.tri(a, c, b);
+    else gb.tri(a, b, c);
+  }
+}
+
+/** A solid block (prism) of the given colour on the trim builder. */
+function block(gb, ring, y0, y1, color, top = ring, capped = true) {
+  gb.color = color;
+  walls(gb, ring, top, y0, y1);
+  if (capped) cap(gb, top, y1);
+}
+
+/** Point (pyramid / spire) over a ring of corners. */
+function point(gb, ring, y0, y1, color) {
+  const cx = ring.reduce((t, p) => t + p[0], 0) / ring.length;
+  const cz = ring.reduce((t, p) => t + p[1], 0) / ring.length;
+  gb.color = color;
+  const apex = [cx, y1, cz, 0, 0];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    gb.tri(apex, [a[0], y0, a[1], 0, 0], [b[0], y0, b[1], 0, 0]);
+  }
+}
+
+/** Overhanging ledge around the top of a wall at y: a band and its top,
+ *  leaving the middle open for the roof. (No underside: it is thin enough
+ *  not to be missed from the street.) */
+function cornice(gb, cx, cz, hx, hz, y, depth, overhang, color) {
+  const inner = rect(cx, cz, hx, hz);
+  const outer = rect(cx, cz, hx + overhang, hz + overhang);
+  gb.color = color;
+  walls(gb, outer, outer, y - depth, y);
+  const P = (p) => [p[0], y, p[1], 0, 0];
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    gb.quad(P(inner[i]), P(outer[i]), P(outer[j]), P(inner[j]));
+  }
+}
+
+/** The classic New York rooftop water tank on its stand, with a conical hat. */
+function waterTower(gb, x, z, r, y) {
+  const base = y + r * 0.8;
+  block(gb, rect(x, z, r * 0.6, r * 0.6), y, base, C.iron, undefined, false);
+  const tank = poly(x, z, r, 8);
+  gb.color = C.wood;
+  walls(gb, tank, tank, base, base + r * 1.6);
+  point(gb, poly(x, z, r * 1.08, 8), base + r * 1.6, base + r * 2.3, C.iron);
+}
+
+function addBuilding(wallBuilders, trim, b) {
+  const rnd = styleRandom(b.x, b.z, 1);
   const h = b.h;
-  const hl = b.l * 0.5;
   const hw = b.w * 0.5;
+  const hl = b.l * 0.5;
+  const ws = h / b.floors;
+  // Walls as in 2006 (whole windows across, v=0 at the top), now in one of
+  // several textures.
+  const gb = wallBuilders[weighted(rnd, BUILDING_WALLS)];
   const sw = Math.trunc(b.w * b.invWin);
   const sl = Math.trunc(b.l * b.invWin);
   const f = b.floors;
@@ -238,43 +401,166 @@ function addBuilding(gb, b) {
   gb.quad(P(hw, h, hl, 0, 0), P(hw, 0, hl, 0, f), P(hw, 0, -hl, sl, f), P(hw, h, -hl, sl, 0));
   gb.quad(P(hw, h, -hl, 0, 0), P(hw, 0, -hl, 0, f), P(-hw, 0, -hl, sw, f), P(-hw, h, -hl, sw, 0));
   gb.quad(P(-hw, h, -hl, 0, 0), P(-hw, 0, -hl, 0, f), P(-hw, 0, hl, sl, f), P(-hw, h, hl, sl, 0));
+
+  if (rnd.chance(0.7)) cornice(trim, b.x, b.z, hw, hl, h, ws * 0.35, ws * 0.12, rnd.chance(0.5) ? C.stone : C.darkstone);
+  if (rnd.chance(0.25) && Math.min(hw, hl) > 25) {
+    const r = ws * rnd.range(0.55, 0.75);
+    const x = b.x + rnd.range(-1, 1) * (hw - r * 1.5);
+    const z = b.z + rnd.range(-1, 1) * (hl - r * 1.5);
+    waterTower(trim, x, z, r, h);
+  }
 }
 
-/** Skyscraper::create_interleaved_array(): one side's triangle strip, drawn
- *  four times rotated -90 degrees about Y. */
-function addSkyscraper(gb, sk) {
-  const { step, spire, windowSize } = sk;
-  const numSteps = step.length;
-  const winMul = 2.0 / windowSize;
-  const sum = [0, sk.w / 2]; // [height, half width]
-  const stepAmount = [windowSize, -1];
-  let t = 0;
-  let s = Math.trunc(sum[1] * winMul);
-  const strip = [];
-  strip.push([-sum[1], sum[0], sum[1], 0, 0]);
-  strip.push([sum[1], sum[0], sum[1], s, 0]);
-  for (let j = 0; j < numSteps - 1; j++) {
-    const axis = j & 1;
-    sum[axis] += step[j] * stepAmount[axis];
-    s = Math.trunc(sum[1] * winMul);
-    t += Math.trunc(step[j]) * (axis ? 0 : 1);
-    strip.push([-sum[1], sum[0], sum[1], 0, t]);
-    strip.push([sum[1], sum[0], sum[1], s, t]);
-  }
-  // Final point in middle of skyscraper roof.
-  sum[1] -= step[numSteps - 1];
-  sum[0] += spire;
-  strip.push([sum[1], sum[0], sum[1], s, t]);
+// ======================================================= skyscrapers
 
-  for (let side = 0; side < 4; side++) {
-    const a = -side * Math.PI / 2; // glRotatef(-90 * side, 0, 1, 0)
-    const c = Math.cos(a);
-    const sn = Math.sin(a);
-    const v = strip.map(([x, y, z, u, w]) => [sk.x + x * c + z * sn, y, sk.z - x * sn + z * c, u, w]);
-    for (let k = 0; k + 2 < v.length; k++) {
-      if (k & 1) gb.tri(v[k + 1], v[k], v[k + 2]);
-      else gb.tri(v[k], v[k + 1], v[k + 2]);
+export const Crown = { FLAT: 'flat', DECO: 'deco', EMPIRE: 'empire', CHRYSLER: 'chrysler', GOTHIC: 'gothic', TEMPLE: 'temple' };
+
+/**
+ * A 1916-zoning-law skyscraper: a podium filling the lot, a few setbacks,
+ * then a tower shaft on a quarter of the lot or so, and a crown. Height and
+ * width come from the 2006 generator (its stepped profile and spire);
+ * everything else from styleRandom().
+ */
+function addSkyscraper(wallBuilders, trim, sk) {
+  const rnd = styleRandom(sk.x, sk.z, 2);
+  const ws = sk.windowSize;
+  let H = 0;
+  for (let j = 0; j < sk.step.length; j += 2) H += sk.step[j] * ws;
+  const W = sk.w / 2;
+  const tall = H + sk.spire > 900;
+  const crown = sk.crown ?? (sk.spire > 0
+    ? weighted(rnd, [[3, Crown.EMPIRE], [3, Crown.CHRYSLER], [1, Crown.GOTHIC]])
+    : weighted(rnd, tall
+      ? [[2, Crown.FLAT], [3, Crown.DECO], [2, Crown.EMPIRE], [2, Crown.CHRYSLER], [2, Crown.GOTHIC], [2, Crown.TEMPLE]]
+      : [[4, Crown.FLAT], [3, Crown.DECO], [1, Crown.GOTHIC], [2, Crown.TEMPLE]]));
+  const wb = wallBuilders[weighted(rnd, SKYSCRAPER_WALLS)];
+  const trimColor = rnd.chance(0.6) ? C.stone : C.darkstone;
+
+  // How much of the height goes on the crown, then the body's tiers.
+  const crownH = {
+    flat: 0, deco: 0.08, empire: 0.1, chrysler: 0.16, gothic: 0.12, temple: 0.12,
+  }[crown] * H;
+  const bodyH = H - crownH;
+  const T = W * rnd.range(0.42, 0.58); // tower half-width
+  const podiumH = Math.max(ws * 3, bodyH * rnd.range(0.12, 0.3));
+  const setbacks = tall ? 2 + Math.floor(rnd.next() * 3) : 1 + Math.floor(rnd.next() * 2);
+  const tiers = [{ half: W, top: podiumH }];
+  let y = podiumH;
+  for (let i = 1; i <= setbacks; i++) {
+    y += Math.max(ws * 2, bodyH * rnd.range(0.04, 0.09));
+    tiers.push({ half: W - (W - T) * (i / (setbacks + 1)), top: y });
+  }
+  tiers.push({ half: T, top: Math.max(y + ws * 4, bodyH) });
+
+  // Snap tier tops to whole floors, draw each with a ledge and a flat roof.
+  let y0 = 0;
+  for (const t of tiers) {
+    const y1 = Math.max(y0 + ws, Math.round(t.top / ws) * ws);
+    const ring = rect(sk.x, sk.z, t.half, t.half);
+    walls(wb, ring, ring, y0, y1, ws);
+    trim.color = C.roof;
+    cap(trim, ring, y1);
+    cornice(trim, sk.x, sk.z, t.half, t.half, y1, ws * 0.4, ws * 0.15, trimColor);
+    t.y0 = y0;
+    t.y1 = y1;
+    y0 = y1;
+  }
+  const top = y0;
+  const r = (k) => rect(sk.x, sk.z, T * k, T * k);
+  const oct = (k) => poly(sk.x, sk.z, T * k, 8);
+
+  switch (crown) {
+    case Crown.FLAT: {
+      // penthouse, maybe a water tank
+      const ph = ws * rnd.range(1.5, 2.5);
+      block(trim, r(0.55), top, top + ph, trimColor);
+      if (rnd.chance(0.6)) waterTower(trim, sk.x + T * 0.55, sk.z - T * 0.55, ws * 0.7, top);
+      break;
     }
+    case Crown.DECO: {
+      // stepped deco top: three narrowing setbacks, each a band of windows
+      let yy = top;
+      const n = 3;
+      for (let i = 0; i < n; i++) {
+        const k = 0.85 - i * 0.2;
+        const ring = r(k);
+        const y1 = yy + crownH / n;
+        walls(wb, ring, ring, yy, y1, ws);
+        trim.color = C.roof;
+        cap(trim, ring, y1);
+        cornice(trim, sk.x, sk.z, T * k, T * k, y1, ws * 0.3, ws * 0.1, trimColor);
+        yy = y1;
+      }
+      if (rnd.chance(0.5)) block(trim, r(0.05), yy, yy + ws * 3, C.iron); // flagpole
+      break;
+    }
+    case Crown.EMPIRE: {
+      // narrow setbacks, then a mooring mast
+      const s1 = top + crownH * 0.35;
+      walls(wb, r(0.7), r(0.7), top, s1, ws);
+      trim.color = C.roof;
+      cap(trim, r(0.7), s1);
+      cornice(trim, sk.x, sk.z, T * 0.7, T * 0.7, s1, ws * 0.3, ws * 0.1, trimColor);
+      const s2 = s1 + crownH * 0.25;
+      block(trim, r(0.45), s1, s2, trimColor);
+      const s3 = s2 + crownH * 0.4;
+      block(trim, oct(0.28), s2, s3, C.steel, oct(0.2));
+      const needle = Math.max(crownH * 0.5, sk.spire * 0.5);
+      point(trim, oct(0.06), s3, s3 + needle, C.steel);
+      break;
+    }
+    case Crown.CHRYSLER: {
+      // stacked, narrowing steel rings with arched windows, then a needle
+      const n = 5;
+      let yy = top;
+      block(trim, oct(0.95), yy, yy + ws, trimColor);
+      yy += ws;
+      for (let i = 0; i < n; i++) {
+        // a straight band, then a sloping step in to the next one
+        const k = 0.9 - i * 0.15;
+        const band = yy + crownH / n * 0.6;
+        const y1 = yy + crownH / n;
+        const color = i & 1 ? C.steel : [0.7, 0.72, 0.76];
+        block(trim, oct(k), yy, band, color, undefined, false);
+        block(trim, oct(k), band, y1, color, oct(k - 0.12));
+        yy = y1;
+      }
+      point(trim, oct(0.12), yy, yy + Math.max(crownH * 0.5, sk.spire * 0.5), C.steel);
+      break;
+    }
+    case Crown.GOTHIC: {
+      // steep copper roof with corner pinnacles and a lantern (Woolworth)
+      const base = top + ws * 0.5;
+      block(trim, r(0.95), top, base, trimColor);
+      const roofTop = base + crownH * 0.75;
+      const lantern = r(0.18);
+      block(trim, r(0.9), base, roofTop, C.copper, r(0.22));
+      block(trim, lantern, roofTop, roofTop + crownH * 0.12, trimColor);
+      point(trim, r(0.2), roofTop + crownH * 0.12, roofTop + crownH * 0.25 + sk.spire, C.copper);
+      for (const [px, pz] of rect(sk.x, sk.z, T * 0.85, T * 0.85)) {
+        const pin = rect(px, pz, T * 0.07, T * 0.07);
+        block(trim, pin, base, base + crownH * 0.25, trimColor);
+        point(trim, pin, base + crownH * 0.25, base + crownH * 0.4, C.copper);
+      }
+      break;
+    }
+    case Crown.TEMPLE: {
+      // colonnade, stepped gilded pyramid, lantern (Municipal / NY Life)
+      const colTop = top + crownH * 0.35;
+      block(trim, r(0.8), top, colTop, C.stone);
+      cornice(trim, sk.x, sk.z, T * 0.8, T * 0.8, colTop, ws * 0.3, ws * 0.12, C.stone);
+      let yy = colTop;
+      const steps = 4;
+      for (let i = 0; i < steps; i++) {
+        const y1 = yy + crownH * 0.4 / steps;
+        block(trim, r(0.75 - i * 0.13), yy, y1, C.gold, r(0.68 - i * 0.13));
+        yy = y1;
+      }
+      block(trim, oct(0.14), yy, yy + crownH * 0.15, C.gold);
+      point(trim, oct(0.14), yy + crownH * 0.15, yy + crownH * 0.25, C.gold);
+      break;
+    }
+    default:
   }
 }
 
@@ -312,15 +598,18 @@ const TREE_TEXTURES = ['tree1.png', 'tree2.png', 'tree3.png', 'tree_autumn.png']
 export async function loadCityMaterials() {
   const dir = 'data/images/city/';
   const bb = 'data/images/billboards/';
-  const [walls, roof, grass, ground, ...trees] = await Promise.all([
-    loadTexture(`${dir}win_brick.jpg`),
+  const [roof, grass, ground, ...rest] = await Promise.all([
     loadTextureVariant(`${dir}building_top_dark2.jpg`, clampTexture),
     loadTexture(`${dir}grass.jpg`),
     loadTexture(`${dir}city_block_base.png`),
     ...TREE_TEXTURES.map((t) => loadTextureVariant(bb + t, clampTexture)),
+    ...WALL_TEXTURES.map((t) => loadTexture(dir + t)),
   ]);
+  const trees = rest.slice(0, TREE_TEXTURES.length);
+  const walls = rest.slice(TREE_TEXTURES.length);
   return {
-    walls: new THREE.MeshLambertMaterial({ map: walls }),
+    walls: walls.map((map) => new THREE.MeshLambertMaterial({ map })),
+    trim: new THREE.MeshLambertMaterial({ vertexColors: true }),
     // billboards: no lighting, depth test but no depth writes, blended
     roof: new THREE.MeshBasicMaterial({ map: roof, side: THREE.DoubleSide, depthWrite: false }),
     grass: new THREE.MeshLambertMaterial({ map: grass }),
@@ -334,9 +623,10 @@ export async function loadCityMaterials() {
 /** Build the meshes for one generated patch. */
 export function buildPatchMeshes(data, materials) {
   const group = new THREE.Group();
-  const walls = new GeomBuilder();
-  for (const b of data.buildings) addBuilding(walls, b);
-  for (const s of data.skyscrapers) addSkyscraper(walls, s);
+  const walls = WALL_TEXTURES.map(() => new GeomBuilder());
+  const trim = new GeomBuilder();
+  for (const b of data.buildings) addBuilding(walls, trim, b);
+  for (const s of data.skyscrapers) addSkyscraper(walls, trim, s);
   const grass = new GeomBuilder();
   for (const p of data.parks) addPark(grass, p);
   const roofs = new GeomBuilder();
@@ -345,13 +635,15 @@ export function buildPatchMeshes(data, materials) {
   for (const t of data.trees) addTree(trees[t.tex], t);
 
   const add = (geom, mat, order) => {
-    if (!geom) return;
+    if (!geom) return null;
     const mesh = new THREE.Mesh(geom, mat);
     mesh.renderOrder = order;
     group.add(mesh);
+    return mesh;
   };
   add(grass.build(), materials.grass, 0);
-  add(walls.build(), materials.walls, 0);
+  walls.forEach((wb, i) => add(wb.build(), materials.walls[i], 0));
+  group.userData.trim = add(trim.build({ colors: true }), materials.trim, 0);
   // billboards_draw() happens after everything else
   add(roofs.build({ normals: false }), materials.roof, 2);
   trees.forEach((tb, i) => add(tb.build({ normals: false }), materials.trees[i], 3));
@@ -393,6 +685,9 @@ export function buildGround(materials) {
 
 // ================================================================ CityGrid
 
+// Cornices, water towers and crowns are left off patches further than this.
+const TRIM_DISTANCE = 5000;
+
 /**
  * PatchGrid: an 8x8 grid of patches kept centred on the camera. When the
  * camera crosses into another patch, the row/column that falls off one side
@@ -413,8 +708,11 @@ export class CityGrid {
   static key(i, j) { return `${i},${j}`; }
 
   addPatch(i, j) {
-    const data = generatePatch((i + 0.5) * CHILD_LENGTH, (j + 0.5) * CHILD_LENGTH);
+    const x = (i + 0.5) * CHILD_LENGTH;
+    const z = (j + 0.5) * CHILD_LENGTH;
+    const data = generatePatch(x, z);
     const meshes = buildPatchMeshes(data, this.materials);
+    meshes.userData.centre = { x, z };
     this.group.add(meshes);
     this.patches.set(CityGrid.key(i, j), meshes);
   }
@@ -432,8 +730,13 @@ export class CityGrid {
     }
   }
 
-  /** PatchGrid::setPosition(camera position) */
-  update(pos) {
+  /**
+   * PatchGrid::setPosition(camera position). New: patches entirely beyond
+   * `visible` (the fog's far end, where they'd be drawn in the fog colour
+   * anyway) are hidden, and the rooftop detail of patches beyond
+   * TRIM_DISTANCE.
+   */
+  update(pos, visible = Infinity) {
     const cx = Math.round(pos.x / CHILD_LENGTH);
     const cz = Math.round(pos.z / CHILD_LENGTH);
     if (cx !== this.centre.x || cz !== this.centre.z) {
@@ -459,6 +762,13 @@ export class CityGrid {
       this.queue.sort((a, b) => d(a) - d(b));
       const [i, j] = this.queue.shift();
       this.addPatch(i, j);
+    }
+    const reach = CHILD_LENGTH * Math.SQRT1_2; // centre to corner
+    for (const meshes of this.patches.values()) {
+      const { x, z } = meshes.userData.centre;
+      const d = Math.max(0, Math.hypot(x - pos.x, z - pos.z) - reach);
+      meshes.visible = d < visible;
+      if (meshes.userData.trim) meshes.userData.trim.visible = d < TRIM_DISTANCE;
     }
   }
 
