@@ -113,6 +113,62 @@ export class Projectile extends Entity {
   }
 }
 
+// Propeller spin, radians per second: idling plus some per unit of speed.
+const PROP_IDLE = 14;
+const PROP_PER_SPEED = 0.12;
+
+/**
+ * Split the propeller (and spinner) off a plane model: the parts of the
+ * mesh that lie wholly ahead of `noseZ` (model space, nose towards +Z).
+ * Returns a Group pivoting about the propeller shaft, holding a mesh of
+ * just those parts, and leaves the rest on `mesh`; null if there are none.
+ * The geometry is shared with other copies of the model, so this makes new
+ * index buffers rather than editing it.
+ */
+function splitPropeller(mesh, noseZ, shaftY) {
+  const g = mesh.geometry;
+  const index = g.index;
+  const z = g.getAttribute('position');
+  if (!index) return null;
+  // connected parts (union-find over the triangles)
+  const parent = new Int32Array(z.count).map((_, i) => i);
+  const find = (a) => {
+    while (parent[a] !== a) a = parent[a] = parent[parent[a]];
+    return a;
+  };
+  for (let i = 0; i < index.count; i += 3) {
+    const a = find(index.getX(i));
+    parent[find(index.getX(i + 1))] = a;
+    parent[find(index.getX(i + 2))] = find(a);
+  }
+  const minZ = new Map();
+  for (let v = 0; v < z.count; v++) {
+    const r = find(v);
+    minZ.set(r, Math.min(minZ.get(r) ?? Infinity, z.getZ(v)));
+  }
+  const body = [];
+  const prop = [];
+  for (let i = 0; i < index.count; i += 3) {
+    const tri = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+    (minZ.get(find(tri[0])) > noseZ ? prop : body).push(...tri);
+  }
+  if (!prop.length) return null;
+  const share = (idx) => {
+    const out = new THREE.BufferGeometry();
+    for (const [k, attr] of Object.entries(g.attributes)) out.setAttribute(k, attr);
+    out.setIndex(idx);
+    out.computeBoundingSphere();
+    return out;
+  };
+  mesh.geometry = share(body);
+  const blades = new THREE.Mesh(share(prop), mesh.material);
+  blades.position.y = -shaftY;
+  const pivot = new THREE.Group();
+  pivot.position.y = shaftY;
+  pivot.add(blades);
+  return pivot;
+}
+
 export class Plane extends Entity {
   constructor(object, bombType) {
     super(object);
@@ -121,6 +177,11 @@ export class Plane extends Entity {
   }
 
   _update(world, msecs) {
+    if (this.propeller) {
+      const speed = this.controller?.speed ?? 0;
+      this.propeller.rotation.z += (PROP_IDLE + speed * PROP_PER_SPEED) * msecs * 0.001;
+      this.propeller.rotation.z %= Math.PI * 2;
+    }
     this.reloadTime = Math.min(1000, Math.max(0, this.reloadTime - msecs));
     if (!(this.firing && this.reloadTime <= 0)) return;
     let movement;
@@ -252,6 +313,10 @@ export class Player {
     const p = new Player();
     const mesh = await loadModel(model, skin);
     mesh.rotation.y = Math.PI; // the model's nose points +Z; forward is -Z
+    // biplane.obj: the propeller and spinner start 240 units ahead of the
+    // origin, on a shaft at y = -8.25
+    const propeller = splitPropeller(mesh, 240, -8.25);
+    if (propeller) mesh.add(propeller);
     const bank = new THREE.Group(); // rolls the model into turns
     bank.add(mesh);
     const object = new THREE.Group();
@@ -261,6 +326,7 @@ export class Player {
     const bombType = await loadProjectileType('bomb');
     p.entity = new Plane(object, bombType);
     p.entity.bank = bank;
+    p.entity.propeller = propeller;
     p.controllers = [new FollowPlaneFilter(), new TopDownPlaneFilter()];
     p.lastModeToggle = null;
     p.setMode(FlyMode.FOLLOW);

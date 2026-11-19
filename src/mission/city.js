@@ -408,12 +408,23 @@ function point(gb, ring, y0, y1, color) {
   }
 }
 
+// Cornices overhang less than half the 2006 SPACING between lots, so the
+// ledges of neighbouring buildings never overlap (coplanar overlaps z-fight).
+const MAX_OVERHANG = SPACING / 2 - 0.1;
+
 /** Overhanging ledge around the top of a wall at y: a band and its top,
  *  leaving the middle open for the roof. (No underside: it is thin enough
- *  not to be missed from the street.) */
-function cornice(gb, cx, cz, hx, hz, y, depth, overhang, color) {
+ *  not to be missed from the street.) `flush` lists the sides shared with
+ *  an adjoining building ('-x', '+x', '-z', '+z'), which get no overhang. */
+function cornice(gb, cx, cz, hx, hz, y, depth, overhang, color, flush = []) {
   const inner = rect(cx, cz, hx, hz);
-  const outer = rect(cx, cz, hx + overhang, hz + overhang);
+  const o = Math.min(overhang, MAX_OVERHANG);
+  const side = (s) => (flush.includes(s) ? 0 : o);
+  const x0 = cx - hx - side('-x');
+  const x1 = cx + hx + side('+x');
+  const z0 = cz - hz - side('-z');
+  const z1 = cz + hz + side('+z');
+  const outer = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
   gb.color = color;
   walls(gb, outer, outer, y - depth, y);
   const P = (p) => [p[0], y, p[1], 0, 0];
@@ -454,14 +465,19 @@ function addBuilding(fb, trim, b, lite = false) {
   }
   pieces.push(left);
   let start = -span / 2;
-  for (const p of pieces) {
+  const axis = alongX ? 'x' : 'z';
+  pieces.forEach((p, i) => {
     const c = start + p / 2;
     start += p;
     const lot = alongX
       ? { x: b.x + c, z: b.z, hx: p / 2, hz: b.l / 2 }
       : { x: b.x, z: b.z + c, hx: b.w / 2, hz: p / 2 };
+    // the sides it shares with its neighbours in the row
+    lot.flush = [];
+    if (i > 0) lot.flush.push(`-${axis}`);
+    if (i < pieces.length - 1) lot.flush.push(`+${axis}`);
     addMidrise(fb, trim, lot, b.h, styleRandom(lot.x, lot.z, 3), lite);
-  }
+  });
 }
 
 /**
@@ -511,7 +527,7 @@ function addMidrise(fb, trimBuilder, lot, lotHeight, rnd, lite = false) {
   floors(fb, ring, lite ? 0 : y, body, layer, WS, yRef, rnd);
   const trimColor = kind === 'walkup' ? weighted(rnd, [[3, C.tin], [2, C.stone], [1, C.darkstone]]) : weighted(rnd, [[2, C.stone], [1, C.darkstone], [1, C.tin]]);
   roofCap(fb, ring, body);
-  cornice(trim, lot.x, lot.z, lot.hx, lot.hz, body, WS * (kind === 'walkup' ? 0.55 : 0.4), WS * (kind === 'walkup' ? 0.22 : 0.14), trimColor);
+  cornice(trim, lot.x, lot.z, lot.hx, lot.hz, body, WS * (kind === 'walkup' ? 0.55 : 0.4), WS * (kind === 'walkup' ? 0.22 : 0.14), trimColor, lot.flush);
   let roofTop = body;
   let hx = lot.hx;
   let hz = lot.hz;
@@ -725,10 +741,9 @@ function crownProxy(gb, crown, sk, T, top, crownH, ws) {
 
 // ===================================================================== trees
 //
-// Every tree is a camera-facing billboard: one quad per tree, instanced, and
-// turned to face the camera in the vertex shader. (2006 drew park trees as
-// CrossTrees, two billboards at right angles; the street trees added since
-// were 3D models.)
+// Every tree is a CrossTree, as the 2006 park trees were: two billboards at
+// right angles, fixed in the world at a random turn, instanced (one quad
+// pair per tree). The street trees added since use them too.
 
 /** A park's grass: SubdividedQuad(x, z, 2) with the texture once across. */
 function addPark(gb, p) {
@@ -741,41 +756,42 @@ function addPark(gb, p) {
 const TREE_TEXTURES = ['tree1.png', 'tree2.png', 'tree3.png', 'tree_autumn.png'];
 const STREET_TREE_HEIGHT = 44;
 
-/** A unit quad centred on the origin, v = 0 at the top (flipY = false). */
-function billboardQuad() {
+/** Two unit quads crossed at right angles, centred on the origin, v = 0
+ *  at the top (flipY = false). */
+function crossQuad() {
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0], 2));
-  g.setIndex([0, 1, 2, 0, 2, 3]);
+  g.setAttribute('position', new THREE.Float32BufferAttribute([
+    -0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0,
+    0, -0.5, -0.5, 0, -0.5, 0.5, 0, 0.5, 0.5, 0, 0.5, -0.5,
+  ], 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0], 2));
+  g.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
   g.computeBoundingSphere();
   return g;
 }
 
-/** Unlit cut-out material for instanced billboards: each instance's quad
- *  is turned to face the camera, at the instance's position and scale. */
-function billboardMaterial(map) {
-  const mat = new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
-  mat.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `
-      vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-      mvPosition.xy += position.xy * vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
-      gl_Position = projectionMatrix * mvPosition;`);
-  };
-  return mat;
+/** Unlit cut-out material for the trees. */
+function treeMaterial(map) {
+  return new THREE.MeshBasicMaterial({ map, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
 }
 
-/** Instanced billboards, one InstancedMesh per tree texture. Each tree is
- *  { x, y (centre), z, w, h, tex, g (tint, optional) }. */
+/** Instanced cross trees, one InstancedMesh per tree texture. Each tree is
+ *  { x, y (centre), z, w, h, rot (degrees), tex, g (tint, optional) }. */
 function buildTrees(trees, materials) {
   const group = new THREE.Group();
   const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const pos = new THREE.Vector3();
+  const scale = new THREE.Vector3();
   const col = new THREE.Color();
   TREE_TEXTURES.forEach((_, tex) => {
     const list = trees.filter((t) => t.tex === tex);
     if (!list.length) return;
     const im = new THREE.InstancedMesh(materials.treeQuad, materials.trees[tex], list.length);
     list.forEach((t, i) => {
-      m.makeScale(t.w, t.h, 1).setPosition(t.x, t.y, t.z);
+      q.setFromAxisAngle(up, (t.rot ?? 0) * Math.PI / 180);
+      m.compose(pos.set(t.x, t.y, t.z), q, scale.set(t.w, t.h, t.w));
       im.setMatrixAt(i, m);
       const g = t.g ?? 1;
       im.setColorAt(i, col.setRGB(g * 0.9, g, g * 0.85));
@@ -799,9 +815,9 @@ export async function loadCityMaterials() {
     trim,
     grass: new THREE.MeshLambertMaterial({ map: grass }),
     ground: new THREE.MeshLambertMaterial({ map: groundTexture(), depthTest: false, depthWrite: false }),
-    trees: trees.map((map) => billboardMaterial(map)),
+    trees: trees.map((map) => treeMaterial(map)),
     treeAspect: trees.map((t) => t.image.width / t.image.height),
-    treeQuad: billboardQuad(),
+    treeQuad: crossQuad(),
     furniture: streetFurniture(),
   };
 }
@@ -851,7 +867,7 @@ function streetFurniture() {
   return { lamp: lampGeometry(), lampFar: lampGeometryFar(), hydrant: hydrantGeometry(), mat };
 }
 
-/** The street trees along every leafy block's curbs (billboards). */
+/** The street trees along every leafy block's curbs (cross trees). */
 function streetTrees(blocks, aspect) {
   const trees = [];
   for (const blk of blocks) {
@@ -868,7 +884,7 @@ function streetTrees(blocks, aspect) {
         const t = -c + (2 * c * (i + 0.5)) / 6;
         const tex = Math.floor(rnd.next() * 3); // (no autumn trees on the street)
         const h = STREET_TREE_HEIGHT * rnd.range(0.8, 1.25);
-        trees.push({ x: blk.x + nx * c - nz * t, y: h / 2, z: blk.z + nz * c + nx * t, w: h * aspect[tex], h, tex, g: rnd.range(0.75, 1.1) });
+        trees.push({ x: blk.x + nx * c - nz * t, y: h / 2, z: blk.z + nz * c + nx * t, w: h * aspect[tex], h, rot: rnd.range(0, 90), tex, g: rnd.range(0.75, 1.1) });
       }
     }
   }
@@ -1038,7 +1054,7 @@ export function buildGround(materials) {
 // - lamp posts and hydrants: full nearer than LAMP_DISTANCE, simple lamp
 //   posts only out to FURNITURE_DISTANCE, nothing beyond (or when the
 //   camera is higher than FURNITURE_MAX_HEIGHT).
-// - trees (billboards, two triangles each): out to TREE_DISTANCE.
+// - trees (cross trees, four triangles each): out to TREE_DISTANCE.
 const NEAR_DISTANCE = 2500;
 const NEAR_KEEP = 1500;
 const LAMP_DISTANCE = 500;

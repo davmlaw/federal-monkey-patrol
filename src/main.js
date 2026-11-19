@@ -102,6 +102,14 @@ function skipToGame() {
   }
 }
 
+/** "Last updated <build time>" (in the viewer's time zone), and the commit. */
+function lastUpdated() {
+  const when = new Date(__BUILD_TIME__).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const c = __BUILD_COMMIT__;
+  const link = c ? ` (<a href="https://github.com/davmlaw/federal-monkey-patrol/commit/${c}">${c}</a>)` : '';
+  return `Last updated ${when}${link}`;
+}
+
 function showMenu({ ended = false } = {}) {
   const chosen = params.get('game');
   overlay.innerHTML = `
@@ -119,7 +127,8 @@ function showMenu({ ended = false } = {}) {
         On a touch screen, use the on-screen stick, throttle and buttons.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
         Turn on hardware acceleration in the browser's settings (or check chrome://gpu).</p>` : ''}
-      <p class="foot"><a href="https://github.com/davmlaw/federal-monkey-patrol">Source on GitHub</a> &middot; GPL v2</p>
+      <p class="foot"><a href="https://github.com/davmlaw/federal-monkey-patrol">Source on GitHub</a> &middot; GPL v2
+        &middot; ${lastUpdated()}</p>
     </div>`;
   overlay.hidden = false;
   overlay.querySelectorAll('a[data-game]').forEach((a) => {
