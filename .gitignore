@@ -22,3 +22,7 @@ doc/html/
 *~
 .DS_Store
 ._*
+
+# Web build
+node_modules/
+dist/
