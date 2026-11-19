@@ -2,12 +2,18 @@
 // previous and next components. Both are played with msecs=0 (frozen) while
 // the transition runs.
 //
-// The C++ masked the next component using the depth buffer. Here the next
-// component is rendered into an offscreen target and the mask shape is drawn
-// with that render as its texture.
+// The C++ masked the next component using the depth buffer. Pictures and
+// story scenes are now HTML layers (stage.js), so when either side is one
+// the mask is CSS: a clip-path on the next layer, or, when the next is a
+// WebGL mission under an HTML layer, a mask with a hole on the previous
+// one. Between two WebGL components the next is rendered into an offscreen
+// target and the mask shape is drawn with that render as its texture.
 
 import { ORTHO_H, ORTHO_W } from '../core/display.js';
 import { GameComponent, Status } from './component.js';
+import { clipInside, makeLayer, maskOutside, outlineLayer, stage, toPercent } from './stage.js';
+
+const isDom = (c) => !!c?.isDom;
 
 const deg2rad = Math.PI / 180;
 
@@ -36,7 +42,9 @@ export class Transition extends GameComponent {
 
   drawLoading(display) {
     // The next component may be a mission generating its city.
-    if (this.prev?.loaded) this.prev.play(display, 0, null);
+    // (an HTML prev would cover a mission's load bar, so leave it out then)
+    const coversLoadBar = isDom(this.prev) && this.next && !isDom(this.next);
+    if (this.prev?.loaded && !coversLoadBar) this.prev.play(display, 0, null);
     if (this.next && !this.next.loaded) this.next.drawLoading(display);
   }
 
@@ -54,16 +62,30 @@ class TransitionFade extends Transition {
   getName() { return 'TransitionFade'; }
 
   representation(display) {
+    const t = this.getState();
+    if (isDom(this.prev) && this.next && !isDom(this.next)) {
+      // WebGL next, under the HTML prev: fade the prev out instead
+      this.next.play(display, 0, null);
+      stage.withEffect({ opacity: 1 - t }, () => this.prev.play(display, 0, null));
+      return;
+    }
     this.prev?.play(display, 0, null);
-    this.next?.play(display, 0, null, this.getState());
+    this.next?.play(display, 0, null, t);
   }
 }
 
 /** Draw prev, then next only inside the mask, then the mask's outline. */
 class TransitionWipe extends Transition {
   representation(display) {
+    if (!this.next) {
+      this.prev?.play(display, 0, null);
+      return;
+    }
+    if (isDom(this.prev) || isDom(this.next)) {
+      this.htmlRepresentation(display);
+      return;
+    }
     this.prev?.play(display, 0, null);
-    if (!this.next) return;
     const rt = display.acquireTarget();
     try {
       display.withTarget(rt, () => this.next.play(display, 0, null));
@@ -77,6 +99,28 @@ class TransitionWipe extends Transition {
   }
 
   renderColor() {}
+
+  /** The mask as one polygon (ortho coordinates) for CSS. */
+  maskPolygon() {
+    const t = this.maskTriangles();
+    const pts = [];
+    for (let i = 0; i < t.length; i += 3) pts.push(t[i + 1]);
+    return pts;
+  }
+
+  htmlRepresentation(display) {
+    const pts = this.maskPolygon().map((p) => toPercent(p, ORTHO_W, ORTHO_H));
+    if (isDom(this.next)) {
+      this.prev?.play(display, 0, null);
+      stage.withEffect({ clipPath: clipInside(pts) }, () => this.next.play(display, 0, null));
+    } else {
+      this.next.play(display, 0, null);
+      stage.withEffect({ mask: maskOutside(pts) }, () => this.prev.play(display, 0, null));
+    }
+    this.htmlOutline(pts);
+  }
+
+  htmlOutline() {}
 }
 
 /** A band sweeping across the screen at `angle` degrees clockwise. */
@@ -99,6 +143,11 @@ class TransitionAngleWipe extends TransitionWipe {
     const s = Math.sin(r);
     const [a, b, cc, d] = pts.map(([x, y]) => [x * c - y * s, x * s + y * c]);
     return [a, b, cc, a, cc, d];
+  }
+
+  maskPolygon() {
+    const t = this.maskTriangles();
+    return [t[0], t[1], t[2], t[5]];
   }
 }
 
@@ -132,6 +181,13 @@ class TransitionStarWipe extends TransitionWipe {
   renderColor(g, display) {
     g.polyline(this.starPoints(), display.px(10), [1, 1, 1, 1], true);
   }
+
+  maskPolygon() { return this.starPoints(); }
+
+  htmlOutline(pts) {
+    this.outline ??= makeLayer('outline');
+    stage.show(outlineLayer(this.outline, pts, Math.max(2, (stage.view?.w ?? 640) / 64)));
+  }
 }
 
 /** A sweep like a clock hand, as on a film leader. */
@@ -150,6 +206,17 @@ class TransitionSpin extends TransitionWipe {
       prev = next;
     }
     return tris;
+  }
+
+  maskPolygon() {
+    const R = 2.0;
+    const end = this.getState() * 360;
+    const pts = [[0, 0], [0, R]];
+    for (let deg = 3; deg < end + 3; deg += 3) {
+      const a = Math.min(deg, end) * deg2rad;
+      pts.push([R * Math.sin(a), R * Math.cos(a)]);
+    }
+    return pts;
   }
 }
 

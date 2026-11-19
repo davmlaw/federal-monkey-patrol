@@ -11,6 +11,9 @@ import { makeCameraMan, Player, World } from './world.js';
 import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LoadBar } from './hud.js';
 import { CityGrid, loadCityMaterials } from './city.js';
 
+// Top-down mode flies this far above the tallest building around the plane.
+const TOPDOWN_CLEARANCE = 150;
+
 /** game/mission/giantclaw.cpp. Built from <claw>, but Mission::update()'s
  *  call to update() was commented out in 2006, so it never changes. */
 class GiantClaw {
@@ -131,7 +134,11 @@ export class Mission extends GameComponent {
     // (2006: fake MONKEY_DEATHS/BLONDE_RESCUES and the claw update were
     // commented out here.)
     this.countdowntimer?.update(gamestats.get(1 /* GAME_SECONDS */));
-    if (input) this.player.read(input, this.speedFor(input.throttle));
+    if (input) {
+      const pos = this.player.entity.object.position;
+      const safe = this.world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
+      this.player.read(input, this.speedFor(input.throttle), safe);
+    }
     this.constraints?.restrict(this.player);
     this.world.update(msecs);
   }

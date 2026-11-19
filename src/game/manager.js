@@ -123,7 +123,8 @@ export class GameManager extends GameComponent {
     else current.play(display, msecs, input);
 
     const s = current.getStatus();
-    if (this.menu.quit() || s === Status.QUIT) {
+    // (Esc no longer quits here: main.js turns it into the pause menu.)
+    if (s === Status.QUIT) {
       this.status = Status.QUIT;
     } else if (this.menu.skip() || (current.loaded && s === Status.NEXT)) {
       this.advance();
@@ -142,6 +143,20 @@ export class GameManager extends GameComponent {
     // free things two steps behind.
     const stale = this.components[old - 1];
     if (stale) this.release(stale);
+  }
+
+  /** True if a mission comes later in the sequence. */
+  hasMissionAhead() {
+    return this.components.some((c, i) => i > this.current && c instanceof Mission);
+  }
+
+  /** Jump straight to the next mission, skipping the story before it. */
+  skipToMission() {
+    const target = this.components.findIndex((c, i) => i > this.current && c instanceof Mission);
+    if (target < 0) return false;
+    for (let i = 0; i < target; i++) this.components[i].dispose();
+    this.current = target;
+    return true;
   }
 
   release(c) {

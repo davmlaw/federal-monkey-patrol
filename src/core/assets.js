@@ -155,6 +155,13 @@ export function unlockAudio() {
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
 }
 
+/** Pause or resume every sound (music and dialogue) together. */
+export function setAudioPaused(paused) {
+  if (!audioCtx) return;
+  if (paused && audioCtx.state === 'running') audioCtx.suspend();
+  else if (!paused && audioCtx.state === 'suspended') audioCtx.resume();
+}
+
 export function loadSound(path) {
   if (!audioCtx) return Promise.resolve(null);
   if (!bufferCache.has(path)) {

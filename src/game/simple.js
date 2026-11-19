@@ -1,52 +1,68 @@
-// game/blank, game/picture and game/soundtrack.
+// game/blank, game/picture and game/soundtrack. Blank and Picture are HTML
+// layers on the stage (see stage.js) rather than WebGL quads.
 
-import { ORTHO_H, ORTHO_W } from '../core/display.js';
-import { Image, Quad } from '../core/draw2d.js';
 import { loadSound, playSound } from '../core/assets.js';
 import { GameComponent, Status } from './component.js';
+import { makeLayer, stage } from './stage.js';
+
+const css = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
 /** A full-screen colour. Like Picture, it is only shown for one frame. */
 export class Blank extends GameComponent {
   constructor() {
     super();
-    this.background = new Quad(ORTHO_W, ORTHO_H);
+    this.isDom = true;
+    this.layer = makeLayer('blank');
+    this.layer.style.background = '#fff';
   }
 
-  setColor(r, g, b) { this.background.setColor(r, g, b); }
+  setColor(r, g, b) { this.layer.style.background = css([r, g, b]); }
 
   _play(display, msecs, input, alpha) {
-    display.draw2d(this.background, alpha);
+    stage.show(this.layer, alpha);
   }
 }
 
 /**
  * A full-screen image. In 2006 the status was never set to PLAYING, so
  * despite the optional display time a picture is shown for a single frame;
- * it is only seen for longer as the prev/next of a transition.
+ * it is only seen for longer as the prev/next of a transition. The colour
+ * tints it (multiplies), as glColor did.
  */
 export class Picture extends GameComponent {
   constructor() {
     super();
+    this.isDom = true;
     this.filename = '';
     this.showTime = 0;
     this.timeDisplayed = 0;
-    this.color = [1, 1, 1, 1];
+    this.color = [1, 1, 1];
   }
 
   setFilename(f) { this.filename = f; }
 
   setTime(ms) { this.showTime = ms; }
 
-  setColor(r, g, b) { this.color = [r, g, b, 1]; }
+  setColor(r, g, b) { this.color = [r, g, b]; }
 
   async _load() {
-    this.image = await Image.load(this.filename, ORTHO_W, ORTHO_H);
-    this.image.setColor(this.color);
+    const img = new Image();
+    img.src = this.filename;
+    img.alt = '';
+    await img.decode().catch(() => console.warn(`Could not load picture "${this.filename}"`));
+    this.layer = makeLayer('picture');
+    this.layer.append(img);
+    if (this.color.some((c) => c < 1)) {
+      const tint = document.createElement('div');
+      tint.className = 'tint';
+      tint.style.background = css(this.color);
+      this.layer.append(tint);
+    }
   }
 
   _play(display, msecs, input, alpha) {
     this.timeDisplayed += msecs;
-    display.draw2d(this.image, alpha);
+    stage.show(this.layer, alpha);
     if (this.timeDisplayed > this.showTime) this.status = Status.NEXT;
   }
 }

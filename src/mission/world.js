@@ -187,6 +187,7 @@ export class FollowPlaneFilter extends InputFilter {
     pitch = Math.max(-MAX_PITCH * deg2rad, Math.min(MAX_PITCH * deg2rad, pitch + this.pitchRate * dt * deg2rad));
     ent.object.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
     this.bank(ent, this.yawRate * BANK_PER_YAW, msecs);
+    if (ent.bank) ent.bank.rotation.x *= 1 - damp(BANK_RESPONSE, msecs);
     ent.velocity.set(0, 0, -this.speed);
     ent.setFiring(this.firing);
   }
@@ -195,6 +196,11 @@ export class FollowPlaneFilter extends InputFilter {
 // Top-down mode: how fast the stick moves the plane across the screen.
 const STRAFE_SPEED = 400;
 const STRAFE_RESPONSE = 10; // 1/s
+// Switching to top-down pulls the plane up above the rooftops: it climbs
+// (never dives) towards `safeHeight`, easing in, nose up while it climbs.
+const CLIMB_RATE = 450; // units per second, at most
+const CLIMB_EASE = 1.5; // 1/s: climb speed per unit of height still to go
+const CLIMB_NOSE_UP = 0.04; // degrees of visual pitch per unit/s of climb
 const LEVEL_RATE = 6; // how quickly the plane levels out, per second
 const BANK_DEGREES = 25;
 
@@ -208,6 +214,7 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
   constructor() {
     super();
     this.strafe = { x: 0, y: 0 };
+    this.safeHeight = 0; // set each frame by the mission
   }
 
   control(ent, msecs) {
@@ -222,8 +229,14 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
     this.bank(ent, -this.strafe.x * BANK_DEGREES, msecs);
     // velocity is in the plane's own frame; use the level frame so any
     // leftover pitch doesn't push it up or down
+    const climb = Math.min(CLIMB_RATE, Math.max(0, (this.safeHeight - ent.object.position.y) * CLIMB_EASE));
+    if (ent.bank) {
+      const x = ent.bank.rotation.x;
+      ent.bank.rotation.x = x + (climb * CLIMB_NOSE_UP * deg2rad - x) * damp(BANK_RESPONSE, msecs);
+    }
     const v = new THREE.Vector3(this.strafe.x * STRAFE_SPEED, 0, -(this.speed + this.strafe.y * STRAFE_SPEED / 2));
     v.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+    v.y = climb;
     v.applyQuaternion(q.clone().invert());
     ent.velocity.copy(v);
     ent.setFiring(this.firing);
@@ -261,14 +274,16 @@ export class Player {
 
   modeName() { return MODE_NAMES[this.mode]; }
 
-  /** speed: the throttle, already mapped to the mission's speed range. */
-  read(input, speed) {
+  /** speed: the throttle, already mapped to the mission's speed range;
+   *  safeHeight: the height top-down mode climbs to (clear of the roofs). */
+  read(input, speed, safeHeight = 0) {
     const t = input.buttonToggled(Button.MODE);
     if (this.lastModeToggle !== null && t !== this.lastModeToggle) {
       this.setMode(this.mode === FlyMode.FOLLOW ? FlyMode.TOPDOWN : FlyMode.FOLLOW);
     }
     this.lastModeToggle = t;
     for (const c of this.controllers) c.speed = speed;
+    this.controllers[FlyMode.TOPDOWN].safeHeight = safeHeight;
     this.controllers[this.mode].read(input);
   }
 }

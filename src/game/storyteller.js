@@ -1,56 +1,50 @@
 // Port of game/storyteller/: cutscenes from .shot files. A picture fills the
-// top two thirds; dialogue lines (with speaker portraits) play underneath,
-// each shown for msec_initial + words * msec_per_word.
+// top two thirds; dialogue lines (with speaker portraits) play underneath.
+//
+// A scene is an HTML layer on the stage (stage.js), so the text is real text
+// and transitions clip or fade the whole scene with CSS. Changed from 2006,
+// where one line at a time was shown for msec_initial + words *
+// msec_per_word in the bitmap font: consecutive lines stack in the box while
+// they fit (earlier ones dimmed) so a conversation reads as one, speakers
+// are named, the timing defaults are slower (story.properties), and a tap,
+// click, Space or Enter moves on to the next line.
 
-import { ORTHO_H, ORTHO_W } from '../core/display.js';
-import { Container2D, Drawable2D, Image, Quad, WordList2D } from '../core/draw2d.js';
-import { loadSound, playSound, readLines, loadTexture } from '../core/assets.js';
+import { loadSound, playSound, readLines } from '../core/assets.js';
+import { Button } from '../core/input.js';
 import { dircheck, settings } from '../core/settings.js';
 import { GameComponent, Status } from './component.js';
+import { makeLayer, stage } from './stage.js';
 
-const IMAGE_V_RATIO = 0.666; // of screen height (ORTHO_H)
-const DIALOGUE_V_RATIO = 1.0 - IMAGE_V_RATIO;
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
 
-// dialogue.cpp
-const BORDER = 0.03;
-const PICTURE_SIZE = 0.1;
-
-class Dialogue extends Drawable2D {
-  /** `image` is the speaker's portrait (or null); `words` includes the speaker. */
-  constructor(w, h, image, words, msecInitial, msecPerWord, sound) {
-    super();
-    this.timeDisplayed = 0;
+class Dialogue {
+  constructor(speaker, portrait, text, timeTotal, sound) {
+    this.speaker = speaker;
+    this.portrait = portrait; // image URL or null (narrator)
+    this.text = text;
+    this.timeTotal = timeTotal;
     this.sound = sound; // decoded buffer, or null
+    this.timeDisplayed = 0;
     this.handle = null;
-    const border = w * BORDER;
-    const size = { x: w - 2 * border, y: h - 2 * border };
-    this.container = new Container2D(size.x, size.y);
-    const topLeft = { x: -size.x / 2, y: size.y / 2 };
-    const pos = { x: 0, y: 0 };
-    if (image) {
-      image.setWidth(w * PICTURE_SIZE);
-      const ps = { x: image.getWidth(), y: -image.getHeight() };
-      image.position = { x: topLeft.x + ps.x / 2, y: topLeft.y + ps.y / 2 };
-      this.container.add(image);
-      pos.x += (ps.x + border) / 2; // shift text right
-      size.x -= image.getWidth() + border;
-      size.y -= image.getHeight();
-    }
-    const text = new WordList2D(size.x, size.y, words);
-    text.position = { x: pos.x, y: topLeft.y - text.getHeight() / 2 };
-    this.timeTotal = msecInitial + text.getWordCount() * msecPerWord;
-    this.container.add(text);
   }
 
-  setTimeFixed(ms) { this.timeTotal = Math.max(this.timeTotal, ms); }
+  node() {
+    const el = document.createElement('div');
+    el.className = this.portrait ? 'line' : 'line narrator';
+    el.innerHTML = (this.portrait ? `<img src="${escapeHtml(this.portrait)}" alt="">` : '')
+      + `<div class="said">${this.portrait ? `<span class="who">${escapeHtml(this.speaker)}</span>` : ''}`
+      + `<span class="text">${escapeHtml(this.text)}</span></div>`;
+    return el;
+  }
 
-  representation(g, alpha) { this.container.draw(g, alpha); }
-
-  speak(display, msecs) {
+  speak(msecs) {
     if (this.sound && !this.handle && !this.done()) this.handle = playSound(this.sound);
     this.timeDisplayed += msecs;
-    display.draw2d(this);
   }
+
+  stop() { this.handle?.stop(); }
 
   done() {
     let done = this.timeDisplayed >= this.timeTotal;
@@ -62,10 +56,12 @@ class Dialogue extends Drawable2D {
 export class StoryTeller extends GameComponent {
   constructor() {
     super();
+    this.isDom = true;
     this.status = Status.PLAYING;
-    this.image = null;
     this.dialogues = [];
     this.current = 0;
+    this.started = false;
+    this.lastTaps = null;
   }
 
   setFilename(f) { this.filename = f; }
@@ -84,12 +80,6 @@ export class StoryTeller extends GameComponent {
     this.msecInitial = parseInt(prop('msec_initial'), 10);
     this.msecPerWord = parseInt(prop('msec_per_word'), 10);
     this.dir = dircheck(prop('dir'));
-
-    const w = ORTHO_W;
-    const h = ORTHO_H * DIALOGUE_V_RATIO;
-    this.textBackground = new Quad(w, h);
-    this.textBackground.setColor(0, 0, 0);
-    this.textBackground.position.y = -ORTHO_H / 2 + h / 2; // bottom
 
     let lines = [];
     try {
@@ -110,10 +100,14 @@ export class StoryTeller extends GameComponent {
         pending.push(this.addDialogue(words));
       }
     }
+    this.layer = makeLayer('story', '<div class="pic"></div><div class="dialogue"></div>');
+    this.box = this.layer.querySelector('.dialogue');
     if (this.imagePath) {
-      this.image = await Image.load(this.imagePath);
-      this.image.setWidth(ORTHO_W);
-      this.image.position.y = ORTHO_H * (IMAGE_V_RATIO - 0.5);
+      const img = new Image();
+      img.src = this.imagePath;
+      img.alt = '';
+      await img.decode().catch(() => console.warn(`Could not load picture "${this.imagePath}"`));
+      this.layer.querySelector('.pic').append(img);
     }
     this.dialogues = (await Promise.all(pending)).filter(Boolean);
     this.current = 0;
@@ -124,44 +118,67 @@ export class StoryTeller extends GameComponent {
     const first = wordlist[0];
     if (!(first.length > 1 && first.endsWith(':'))) return null;
     const speaker = first.slice(0, -1);
-    const width = ORTHO_W;
-    const height = ORTHO_H * DIALOGUE_V_RATIO;
     // A narrator by default has no portrait.
-    let portrait = null;
-    if (Object.hasOwn(this.portrait, speaker)) {
-      portrait = new Image(await loadTexture(this.dir + this.portrait[speaker]));
-    }
+    const portrait = Object.hasOwn(this.portrait, speaker) ? this.dir + this.portrait[speaker] : null;
     // SOUND= and TIME= tokens (first of each) are removed from the text.
-    const words = wordlist.slice();
+    const words = wordlist.slice(1);
     let sound = null;
     let timeFixed = 0;
-    const s = words.findIndex((x, i) => i > 0 && x.includes('SOUND='));
+    const s = words.findIndex((x) => x.includes('SOUND='));
     if (s >= 0) {
       const name = words[s].slice(words[s].indexOf('SOUND=') + 6);
       sound = await loadSound(`data/sound/sfx/${name}`);
       words.splice(s, 1);
     }
-    const t = words.findIndex((x, i) => i > 0 && x.includes('TIME='));
+    const t = words.findIndex((x) => x.includes('TIME='));
     if (t >= 0) {
       timeFixed = parseInt(words[t].slice(words[t].indexOf('TIME=') + 5), 10) || 0;
       words.splice(t, 1);
     }
-    const d = new Dialogue(width, height, portrait, words, this.msecInitial, this.msecPerWord, sound);
-    d.setTimeFixed(timeFixed);
-    d.position.y = -ORTHO_H / 2 + height / 2; // bottom
-    return d;
+    const text = words.filter(Boolean).join(' ');
+    const time = Math.max(timeFixed, this.msecInitial + words.length * this.msecPerWord);
+    return new Dialogue(speaker, portrait, text, time, sound);
+  }
+
+  /** A new press of Space/Enter or a tap/click since the last frame. */
+  tapped(input) {
+    if (!input) return false;
+    const taps = [input.buttonToggled(Button.FIRE1), input.buttonToggled(Button.NEXT)];
+    const last = this.lastTaps;
+    this.lastTaps = taps;
+    return !!last && (taps[0] !== last[0] || taps[1] !== last[1]);
+  }
+
+  /** Show line i in the box, stacked under the earlier ones if it fits. */
+  show(i) {
+    const node = this.dialogues[i].node();
+    for (const n of this.box.children) n.classList.add('earlier');
+    this.box.append(node);
+    if (this.box.children.length > 1 && this.box.scrollHeight > this.box.clientHeight + 1) {
+      for (const n of [...this.box.children]) if (n !== node) n.remove();
+    }
   }
 
   _play(display, msecs, input, alpha) {
-    if (this.image) display.draw2d(this.image, alpha);
-    display.draw2d(this.textBackground, alpha);
+    stage.show(this.layer, alpha); // on the stage first, so the box can be measured
     const d = this.dialogues[this.current];
     if (!d) return;
-    d.speak(display, msecs);
-    if (d.done()) {
-      // keep drawing the last dialogue after the component has finished
-      if (this.current + 1 < this.dialogues.length) this.current++;
-      else this.status = Status.NEXT;
+    if (!this.started) {
+      this.started = true;
+      this.show(this.current);
+    }
+    if (!input) return; // drawn by a transition or while paused: frozen
+    d.speak(msecs);
+    const tap = this.tapped(input);
+    if (this.status === Status.PLAYING && (tap || d.done())) {
+      if (tap) d.stop();
+      // keep showing the last dialogue after the component has finished
+      if (this.current + 1 < this.dialogues.length) {
+        this.current++;
+        this.show(this.current);
+      } else {
+        this.status = Status.NEXT;
+      }
     }
   }
 }

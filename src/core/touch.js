@@ -1,5 +1,6 @@
 // On-screen flight controls (not in the 2006 version): a stick, a throttle
-// lever, a fire button, a button to switch flying mode, and quit. They work
+// lever, a fire button and a button to switch flying mode. (The pause /
+// main menu button is in main.js, since it shows in the story too.) They work
 // with touch, pen or mouse, and act as one more InputManager device, so they
 // fill the same Input struct as the keyboard and gamepad.
 
@@ -13,7 +14,6 @@ const HTML = `
   </div>
   <button class="tc-mode" type="button">FOLLOW</button>
   <button class="tc-fire" type="button">FIRE</button>
-  <button class="tc-quit" type="button" aria-label="Quit">&times;</button>
 `;
 
 export class TouchControls {
@@ -39,7 +39,6 @@ export class TouchControls {
     this.drag(this.track, (e) => this.moveThrottle(e));
     this.hold(this.el.querySelector('.tc-fire'), Button.FIRE1);
     this.hold(this.modeBtn, Button.MODE);
-    this.hold(this.el.querySelector('.tc-quit'), Button.QUIT);
   }
 
   /** Pointer drag on `el`, captured so it keeps tracking outside it. */

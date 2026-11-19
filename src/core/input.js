@@ -1,8 +1,10 @@
 // Port of input/: InputManager + Keyboard/Joystick devices filling an Input
 // struct (axis + buttons), and the InputFilter/MenuFilter that read it.
 
-export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4 };
-const NUM_BUTTONS = 5;
+// NEXT: a tap or click on the game screen (moves story dialogue on).
+// QUIT (Esc) now opens the pause menu rather than quitting straight away.
+export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4, NEXT: 5 };
+const NUM_BUTTONS = 6;
 
 // Throttle starts where the commented-out 2006 code had the plane's speed
 // (`velocity.z = -600`, out of the default max_speed of 1000).
@@ -128,6 +130,31 @@ class Joystick {
   getAxis() { return this.axis; }
 
   dispose() {}
+}
+
+/** Taps and clicks on the game canvas, as Button.NEXT. */
+export class PointerTap {
+  constructor(input, el) {
+    this.input = input;
+    this.el = el;
+    this.pending = false;
+    this.onDown = (e) => {
+      if (e.button > 0) return;
+      this.input.setButton(Button.NEXT, true);
+      this.pending = true;
+    };
+    el.addEventListener('pointerdown', this.onDown);
+  }
+
+  getAxis() { return { x: 0, y: 0 }; }
+
+  update() {
+    // a tap is a press for one frame
+    if (this.pending) this.pending = false;
+    else if (this.input.buttonPressed(Button.NEXT)) this.input.setButton(Button.NEXT, false);
+  }
+
+  dispose() { this.el.removeEventListener('pointerdown', this.onDown); }
 }
 
 export class InputManager {
