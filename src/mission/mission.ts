@@ -15,8 +15,10 @@ import { Banner, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, Li
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 
-// Top-down mode flies this far above the tallest building around the plane.
-const TOPDOWN_CLEARANCE = 150;
+// Top-down mode flies this far above the tallest building around the plane
+// (plus a kong's height, when they're on the roofs): high, so with the
+// camera close over the plane it shows it big and still a lot of the city.
+const TOPDOWN_CLEARANCE = 380;
 // After a crash: how long the wreck burns before the next plane, how high
 // over the rooftops it comes back, and how long it can't crash again.
 const RESPAWN_MSECS = 2500;

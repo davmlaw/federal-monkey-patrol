@@ -14,8 +14,9 @@ import { Effects } from './effects.ts';
 const deg2rad = Math.PI / 180;
 
 // Top-down camera: straight down from this far above the plane, its
-// heading up (2006: 160).
-const TOPDOWN_CAMERA = 400;
+// heading up (2006: 160). Close, so the plane shows big; the plane flies
+// high (see TOPDOWN_CLEARANCE in mission.ts) so the city still does.
+const TOPDOWN_CAMERA = 170;
 
 // Flight handling. The stick sets a turn rate that the plane reaches in a
 // few hundredths of a second; yaw is about the world's up so the horizon stays level, and the
