@@ -4,12 +4,16 @@
 //   <condition> <AND|OR|NOT|stat name="..." op="gte" value="5" /> </condition>
 //   <result> <value>next</value> <message>...</message> </result>
 // </scenario>
+//
+// A message can quote stats in braces: "{monkey_deaths} kongs downed".
 
 import { statusFromName, statusName, type Status } from '../game/component.ts';
 import { gamestats, statFromName, Stat } from './stats.ts';
+import { settings } from '../core/settings.ts';
 
-/** Something whose status a Result can change (a Mission). */
-export interface StatusTarget { setStatus(s: Status): void }
+/** Something whose status a Result can change (a Mission): it shows the
+ *  message, then takes the status. */
+export interface StatusTarget { finish(s: Status, message: string): void }
 
 /** The player, as far as Constraints needs it. */
 export interface Constrained { entity: { object: { position: { y: number } } } }
@@ -78,8 +82,12 @@ class ChangeStatusResult {
 
   execute(component: StatusTarget): void {
     if (this.done) return;
-    console.log(`ChangeGameStatus->execute() status = ${statusName(this.toStatus)} (${this.message})`);
-    component.setStatus(this.toStatus);
+    const message = this.message.replace(/\{(\w+)\}/g, (m, name: string) => {
+      const s = statFromName(name);
+      return s === Stat.NOSUCHSTAT ? m : String(gamestats.get(s));
+    });
+    console.log(`ChangeGameStatus->execute() status = ${statusName(this.toStatus)} (${message})`);
+    component.finish(this.toStatus, message);
     if (this.onceOnly) this.done = true;
   }
 }
@@ -116,17 +124,24 @@ export class Outcomes {
 }
 
 /**
- * Limits on the player. Only the height is ever enforced.
+ * Limits on the player: the height is enforced here, the speed range is
+ * what the throttle maps to (the plane never flies slower than minSpeed).
  *
  * Note: the mission builder looks for <max_height>, <min_height>,
  * <max_speed> and <min_speed>, but the mission XML files say <maxheight>
- * etc., so in practice the defaults below apply (see mission.ts).
+ * etc., so in practice the defaults apply (see mission.ts).
  */
 export class Constraints {
   maxHeight = 10000;
   minHeight = 0;
-  maxSpeed = 1000;
-  minSpeed = 0;
+  /** game.properties' max_speed and min_speed, unless a mission says otherwise. */
+  maxSpeed: number;
+  minSpeed: number;
+
+  constructor() {
+    this.maxSpeed = settings.getf('game', 'max_speed') || 1000;
+    this.minSpeed = Math.min(this.maxSpeed, settings.getf('game', 'min_speed') || 0);
+  }
 
   restrict(player: Constrained): void {
     const p = player.entity.object.position;

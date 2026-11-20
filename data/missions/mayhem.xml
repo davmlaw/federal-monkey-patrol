@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- Monkey mayhem: kongs all over a wider patrol area, easier to bring
+     down and quick to be replaced. Down as many as you can in the time. -->
+<mission>
+
+<startconditions>
+  <height>600</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <kongs respawn_msecs="1000" health_min="2" health_max="4">24</kongs>
+  <patrolradius>4000</patrolradius>
+  <countdown>
+    <label>Time remaining</label>
+    <seconds>180</seconds>
+  </countdown>
+</startconditions>
+
+<outcomes>
+  <scenario>
+    <condition>
+      <stat name="game_seconds" op="gte" value="180" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>Time's up!</message>
+    </result>
+  </scenario>
+</outcomes>
+
+</mission>

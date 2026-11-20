@@ -7,8 +7,9 @@ export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4
 export type Button = (typeof Button)[keyof typeof Button];
 const NUM_BUTTONS = 6;
 
-// Starting throttle: 600 of the default max_speed of 1000.
-export const DEFAULT_THROTTLE = 0.6;
+// Starting throttle: halfway, 600 between game.properties' min_speed of 200
+// and max_speed of 1000.
+export const DEFAULT_THROTTLE = 0.5;
 // Keyboard/gamepad throttle change, per second held.
 const THROTTLE_RATE = 0.5;
 

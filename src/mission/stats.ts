@@ -43,6 +43,8 @@ class GameStatistics {
 
   inc(s: Stat): void { this.stats[s]++; }
 
+  set(s: Stat, value: number): void { this.stats[s] = value; }
+
   toString(): string {
     return NAMES.map((n, i) => `${n} = ${this.stats[i]}`).join('\n');
   }

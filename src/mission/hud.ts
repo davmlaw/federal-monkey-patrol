@@ -1,5 +1,6 @@
 // HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
-// TurnBack, the FPS readout, and the "generating skyscrapers" LoadBar.
+// TurnBack, Tally, Banner, the FPS readout, and the "generating
+// skyscrapers" LoadBar.
 
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
 import {
@@ -216,6 +217,54 @@ export class TurnBack extends Drawable2D {
     this.line.text = `Leaving the patrol area: ${s} second${s === 1 ? '' : 's'}`;
     this.line.setWidth(textWidth(this.line.text) * this.line.font);
     this.line.position.y = -0.04;
+    this.line.draw(g, alpha);
+  }
+}
+
+/** One line of HUD text that changes, e.g. "KONGS LEFT 5". */
+export class Tally extends Drawable2D {
+  private line: Text2D;
+
+  constructor(font = 0.22) {
+    super();
+    this.line = new Text2D('', font);
+    this.setHeight(textHeight('0') * font);
+  }
+
+  set text(t: string) {
+    if (t === this.line.text) return;
+    this.line.text = t;
+    this.line.setWidth(textWidth(t) * this.line.font);
+    this.setWidth(this.line.getWidth());
+  }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    this.line.draw(g, alpha);
+  }
+}
+
+/** The end of a mission: a big title and a line under it, centred. */
+export class Banner extends Drawable2D {
+  private title = new Text2D('', 0.5);
+  private line = new Text2D('', 0.22);
+
+  constructor() {
+    super();
+    this.title.setColor(1, 0.85, 0.3);
+    this.title.position.y = 0.04;
+    this.line.position.y = -0.05;
+  }
+
+  set(title: string, line: string): void {
+    for (const [t, s] of [[this.title, title], [this.line, line]] as const) {
+      t.text = s;
+      t.setWidth(textWidth(s) * t.font);
+      t.setHeight(textHeight(s) * t.font);
+    }
+  }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    this.title.draw(g, alpha);
     this.line.draw(g, alpha);
   }
 }

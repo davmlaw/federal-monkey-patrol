@@ -57,6 +57,21 @@ html, body {
 }
 
 .panel .sub { margin: 2px 0 18px; color: var(--muted); }
+.panel .sub .result { color: var(--accent); font-weight: bold; margin-right: 6px; }
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.extras { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.extras a { color: var(--muted); }
+.extras a .t { display: inline; }
+.extras a:hover, .extras a:focus, .extras a.chosen { color: var(--accent); outline: none; }
 
 .games { list-style: none; margin: 0 0 16px; padding: 0; }
 

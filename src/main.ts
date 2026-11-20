@@ -17,18 +17,24 @@ import { stopMusic } from './game/simple.ts';
 import { gamestats } from './mission/stats.ts';
 import { Tuner } from './tuner.ts';
 import { TouchControls } from './core/touch.ts';
-import { Mission } from './mission/mission.ts';
+import { lastResult, Mission } from './mission/mission.ts';
 import { StoryTeller } from './game/storyteller.ts';
 import { stage } from './game/stage.ts';
 
-const GAMES = [
-  { file: 'data/federal_monkey_patrol.game', title: 'Federal Monkey Patrol', note: 'The story: film leader, intro and the four chapters (it has no missions yet)' },
-  { file: 'fly.game', title: 'Fly', note: 'Straight into a mission: claw.xml' },
-  { file: 'mission.game', title: 'Mission', note: 'test.xml, with its countdown timer' },
-  { file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
+// The title screen's choices. Each is a .game file; the modes are single
+// missions (data/missions/*.xml) that can later be slotted into the story.
+type Group = 'mode' | 'story' | 'extra';
+const GAMES: { file: string; title: string; note: string; group: Group }[] = [
+  { group: 'mode', file: 'clear.game', title: 'Clear the Area', note: 'Eight kongs in the patrol area and no more coming: shoot them all down' },
+  { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, kongs everywhere: down as many as you can' },
+  { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
+  { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Film leader, intro and the four chapters (no missions in it yet)' },
+  { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
+  { group: 'extra', file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
 ];
+// "Skip to game" from a story with no missions in it
+const FREE_FLIGHT = 'fly.game';
 
-const params = new URLSearchParams(window.location.search);
 const overlay = document.getElementById('overlay') as HTMLDivElement;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 
@@ -98,9 +104,8 @@ function skipToGame(): void {
   if (game.skipToMission()) {
     canvas.focus();
   } else {
-    const fly = GAMES[1].file;
-    window.history.replaceState(null, '', gameUrl(fly));
-    start(fly);
+    window.history.replaceState(null, '', gameUrl(FREE_FLIGHT));
+    start(FREE_FLIGHT);
   }
 }
 
@@ -113,18 +118,26 @@ function lastUpdated(): string {
 }
 
 function showMenu({ ended = false } = {}): void {
-  const chosen = params.get('game');
+  const chosen = new URLSearchParams(window.location.search).get('game');
+  const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
+    : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
+    : 'The End.';
+  const link = (g: (typeof GAMES)[number], note = true): string => `
+    <a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen ? 'chosen' : ''}">
+      <span class="t">${g.title}</span>${note ? `<span class="n">${g.note}</span>` : ''}</a>`;
+  const group = (k: Group): (typeof GAMES)[number][] => GAMES.filter((g) => g.group === k);
   overlay.innerHTML = `
     <div class="panel">
       <h1>Federal Monkey Patrol</h1>
-      <p class="sub">${ended ? 'The End.' : 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'}</p>
-      <ul class="games">
-        ${GAMES.map((g) => `
-          <li><a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen ? 'chosen' : ''}">
-            <span class="t">${g.title}</span><span class="n">${g.note}</span></a></li>`).join('')}
-      </ul>
+      <p class="sub">${sub}</p>
+      <h2>Game modes</h2>
+      <ul class="games">${group('mode').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
+      <h2>Story</h2>
+      <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
+      <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}</p>
       <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
-        M or Tab: switch flying mode &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
+        M or Tab: switch flying mode (in top-down mode, bullets find kongs at any height) &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
         In the story, tap, click, Space or Enter for the next line.
         On a touch screen, use the on-screen stick, throttle and buttons.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
@@ -140,7 +153,7 @@ function showMenu({ ended = false } = {}): void {
       start(a.dataset.game ?? null);
     });
   });
-  overlay.querySelector<HTMLAnchorElement>('a.chosen, a[data-game]')?.focus();
+  (overlay.querySelector<HTMLAnchorElement>('a.chosen') ?? overlay.querySelector<HTMLAnchorElement>('a[data-game]'))?.focus();
 }
 
 async function start(file: string | null): Promise<void> {

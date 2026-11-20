@@ -195,6 +195,12 @@ export class Kong extends Entity {
     return { t, point: axis.addScaledVector(normal, r), normal };
   }
 
+  override aim(): { point: THREE.Vector3; radius: number } | null {
+    if (this.dying) return null;
+    const { a, b, r } = this.capsule();
+    return { point: a.lerp(b, 0.5), radius: r };
+  }
+
   override distanceTo(point: THREE.Vector3): number {
     const { a, b, r } = this.capsule();
     return new THREE.Line3(a, b).closestPointToPoint(point, true, new THREE.Vector3()).distanceTo(point) - r;
@@ -500,28 +506,48 @@ const SPAWN_NEAR = 700;
 const SPAWN_APART = 600;
 
 /** Keeps a few kongs roaming the patrol area. */
+/** A mission's say over its kongs (<kongs> in <startconditions>); anything
+ *  left out comes from kong.properties. */
+export interface TroopOptions {
+  /** How many at once. */
+  count?: number;
+  /** Milliseconds after one falls before another comes; null: never (the
+   *  first `count` are all there are). */
+  respawnMsecs?: number | null;
+  healthMin?: number;
+  healthMax?: number;
+}
+
 export class KongTroop {
   private kongs: Kong[] = [];
   private respawn = 0;
   private started = false;
+  /** No more come once these are down. */
+  readonly respawns: boolean;
+  public count: number;
 
   private constructor(
     private proto: THREE.Mesh,
     private roar: AudioBuffer | null,
     private cfg: KongConfig,
-    public count: number,
+    opts: TroopOptions,
     readonly area: Area,
-  ) {}
+  ) {
+    this.count = opts.count ?? cfg.count;
+    this.respawns = opts.respawnMsecs !== null;
+    if (opts.respawnMsecs != null) cfg.respawnMsecs = opts.respawnMsecs;
+    if (opts.healthMin != null) cfg.healthMin = opts.healthMin;
+    if (opts.healthMax != null) cfg.healthMax = Math.max(cfg.healthMin, opts.healthMax);
+  }
 
-  /** `count`: how many at once (null: kong.properties' count); they keep
-   *  to `area`. */
-  static async create(count: number | null, area: Area): Promise<KongTroop> {
+  /** They keep to `area`. */
+  static async create(opts: TroopOptions, area: Area): Promise<KongTroop> {
     const cfg = loadConfig();
     const [proto, roar] = await Promise.all([
       loadModel(cfg.model, cfg.skin),
       loadSound('data/sound/sfx/kong_roar.wav'),
     ]);
-    return new KongTroop(proto, roar, cfg, count ?? cfg.count, area);
+    return new KongTroop(proto, roar, cfg, opts, area);
   }
 
   private make(): Kong {
@@ -578,6 +604,7 @@ export class KongTroop {
     }
     this.kongs = this.kongs.filter((k) => !k.isDead());
     const alive = this.living().length;
+    if (!this.respawns) return;
     if (alive >= this.count) {
       this.respawn = this.cfg.respawnMsecs;
     } else {
@@ -588,6 +615,9 @@ export class KongTroop {
       }
     }
   }
+
+  /** Kongs still to shoot down: all of them, before they've arrived. */
+  remaining(): number { return this.started ? this.living().length : this.count; }
 
   /** Kongs that are still up (for the HUD and tests). */
   living(): Kong[] { return this.kongs.filter((k) => !k.isDying()); }

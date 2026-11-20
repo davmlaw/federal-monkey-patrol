@@ -93,6 +93,10 @@ export class Entity {
   /** Shootable entities: hit for `damage` at `hit`, by something going at
    *  `velocity`. */
   struck(_world: World, _hit: Hit, _velocity: THREE.Vector3, _damage: number): void {}
+
+  /** Shootable entities still standing: the point top-down bullets curve
+   *  down to, and how close (across the ground) they must pass to hit. */
+  aim(): { point: THREE.Vector3; radius: number } | null { return null; }
 }
 
 // data/etc/projectiles/<type>.properties -> projectile type
@@ -137,10 +141,21 @@ const BULLET_DAMAGE = 1;
 const BOMB_DAMAGE = 4; // to everything within the blast
 const BOMB_BLAST_RADIUS = 25;
 
+// Top-down bullets: how much the curve steepens towards the end (0..1;
+// lower stays flatter for longer, 1 is a straight line to the target).
+const FLAT_CURVE = 0.5;
+
 export class Projectile extends Entity {
   lifetime: number;
   /** Bombs explode where they land; bullets throw up sparks. */
   bomb = false;
+  /**
+   * A top-down bullet: the game is 2D from up there, so it flies level
+   * through (over) the city with `velocity` in world space, hits whatever
+   * shootable thing its path crosses on the map, at any height, and curves
+   * down onto the first one ahead of it so it looks that way too.
+   */
+  flat = false;
 
   constructor(ptype: ProjectileType) {
     // (a type with no drawable throws here, as it always has)
@@ -166,6 +181,54 @@ export class Projectile extends Entity {
   }
 
   setLifetime(ms: number): void { this.lifetime = ms; }
+
+  override update(world: World, msecs: number): void {
+    if (!this.flat) {
+      super.update(world, msecs);
+      return;
+    }
+    const p = this.object.position;
+    const v = this.velocity;
+    const speed = Math.hypot(v.x, v.z);
+    if (speed < 1e-6) return;
+    const dx = v.x / speed;
+    const dz = v.z / speed;
+    const step = speed * msecs / 1000;
+    // the first target whose circle the path crosses: this frame's hit, or
+    // further on, the one to curve down to
+    let best: { point: THREE.Vector3; radius: number; target: Entity } | null = null;
+    let bestAlong = Infinity;
+    for (const e of world.entities) {
+      if (!e.shootable || e.isDead()) continue;
+      const a = e.aim();
+      if (!a) continue;
+      const rx = a.point.x - p.x;
+      const rz = a.point.z - p.z;
+      const side = Math.abs(rx * dz - rz * dx);
+      if (side > a.radius) continue;
+      // where the path enters the circle
+      const along = rx * dx + rz * dz - Math.sqrt(a.radius * a.radius - side * side);
+      if (along + 2 * a.radius < 0 || along >= bestAlong) continue;
+      best = { ...a, target: e };
+      bestAlong = along;
+    }
+    if (best && bestAlong <= step) {
+      const at = Math.max(0, bestAlong);
+      const point = new THREE.Vector3(p.x + dx * at, best.point.y, p.z + dz * at);
+      const hit: Hit = { t: at / step, point, normal: new THREE.Vector3(-dx, 0, -dz) };
+      this.object.position.copy(point);
+      this.hit(world, hit, new THREE.Vector3(v.x, (best.point.y - p.y) * 1000 / msecs, v.z), best.target);
+      return;
+    }
+    if (best) {
+      // still `bestAlong` to go: drop part of the way, so the error shrinks
+      // like distance^FLAT_CURVE and is gone on arrival
+      p.y += (best.point.y - p.y) * Math.min(1, FLAT_CURVE * step / bestAlong);
+    }
+    p.x += dx * step;
+    p.z += dz * step;
+    this._update(world, msecs);
+  }
 
   protected override _update(_world: World, msecs: number): void {
     if (this.lifetime) {
@@ -249,6 +312,10 @@ export class Plane extends Entity {
   crashed = false;
   /** Milliseconds left without collisions, after a respawn. */
   invulnerable = 0;
+  /** Top-down mode: bullets are flat (see Projectile.flat). */
+  flatShots = false;
+  /** Can't crash (the mission is over). */
+  charmed = false;
 
   constructor(object: THREE.Object3D, private bombType: ProjectileType) {
     super(object);
@@ -256,7 +323,7 @@ export class Plane extends Entity {
   }
 
   override hit(world: World, hit: Hit, velocity: THREE.Vector3): void {
-    if (this.crashed || this.invulnerable > 0) return;
+    if (this.crashed || this.invulnerable > 0 || this.charmed) return;
     // (flying into a kong crashes the plane just the same)
     this.crashed = true;
     const f = (v: THREE.Vector3): string => v.toArray().map((n) => n.toFixed(1)).join(', ');
@@ -283,6 +350,7 @@ export class Plane extends Entity {
     }
     this.reloadTime = Math.min(1000, Math.max(0, this.reloadTime - msecs));
     if (!(this.firing && this.reloadTime <= 0)) return;
+    const flat = this.firing === 1 && this.flatShots;
     let movement: THREE.Vector3;
     if (this.firing === 1) {
       movement = new THREE.Vector3(0, 0, -BULLET_SPEED); // "bullet"
@@ -300,6 +368,12 @@ export class Plane extends Entity {
       bomb.object.position.copy(this.object.position).addScaledVector(offset, sign);
       bomb.object.quaternion.copy(this.object.quaternion);
       bomb.velocity.copy(this.velocity).add(movement);
+      if (flat) {
+        // into world space, level
+        bomb.velocity.applyQuaternion(this.object.quaternion).setY(0);
+        bomb.flat = true;
+        bomb.radius = null; // over the buildings, not into them
+      }
       bomb.setLifetime(this.firing === 1 ? BULLET_MSECS : 5000);
       bomb.bomb = this.firing === 2;
       world.addEntity(bomb);
@@ -317,6 +391,8 @@ export class FollowPlaneFilter extends InputFilter implements Controller {
   axis: Axis = { x: 0, y: 0 };
   firing = 0;
   speed = 0;
+  /** The plane never goes slower than this (game.properties min_speed). */
+  minSpeed = 0;
   yawRate = 0; // degrees per second
   pitchRate = 0;
 
@@ -402,7 +478,8 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
       const x = ent.bank.rotation.x;
       ent.bank.rotation.x = x + (climb * CLIMB_NOSE_UP * deg2rad - x) * damp(BANK_RESPONSE, msecs);
     }
-    const v = new THREE.Vector3(this.strafe.x * STRAFE_SPEED, 0, -(this.speed + this.strafe.y * STRAFE_SPEED / 2));
+    const forward = Math.max(this.minSpeed, this.speed + this.strafe.y * STRAFE_SPEED / 2);
+    const v = new THREE.Vector3(this.strafe.x * STRAFE_SPEED, 0, -forward);
     v.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     v.y = climb;
     v.applyQuaternion(q.clone().invert());
@@ -447,6 +524,7 @@ export class Player {
   setMode(m: FlyMode): void {
     this.mode = m;
     this.entity.setController(this.controllers[m]);
+    this.entity.flatShots = m === FlyMode.TOPDOWN;
   }
 
   modeName(): string { return MODE_NAMES[this.mode]; }
@@ -476,15 +554,19 @@ export class Player {
     p.invulnerable = invulnerable;
   }
 
-  /** speed: the throttle, already mapped to the mission's speed range;
-   *  safeHeight: the height top-down mode climbs to (clear of the roofs). */
-  read(input: Input, speed: number, safeHeight = 0): void {
+  /** speed: the throttle, already mapped to the mission's speed range,
+   *  whose bottom is minSpeed; safeHeight: the height top-down mode climbs
+   *  to (clear of the roofs). */
+  read(input: Input, speed: number, minSpeed: number, safeHeight = 0): void {
     const t = input.buttonToggled(Button.MODE);
     if (this.lastModeToggle !== null && t !== this.lastModeToggle) {
       this.setMode(this.mode === FlyMode.FOLLOW ? FlyMode.TOPDOWN : FlyMode.FOLLOW);
     }
     this.lastModeToggle = t;
-    for (const c of this.controllers) c.speed = speed;
+    for (const c of this.controllers) {
+      c.speed = speed;
+      c.minSpeed = minSpeed;
+    }
     this.controllers[FlyMode.TOPDOWN].safeHeight = safeHeight;
     this.controllers[this.mode].read(input);
   }

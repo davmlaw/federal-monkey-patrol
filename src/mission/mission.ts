@@ -11,9 +11,9 @@ import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
+import { Banner, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar, Radar, Tally, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
-import { KongTroop, type Area } from './kongs.ts';
+import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 
 // Top-down mode flies this far above the tallest building around the plane.
 const TOPDOWN_CLEARANCE = 150;
@@ -28,6 +28,21 @@ const RADAR_RANGE = 2400;
 const RADAR_SIZE = 0.2;
 // After losing a plane for flying out of bounds: this long a message shows.
 const OUT_MESSAGE_MSECS = 3000;
+// When an outcome ends the mission, its message shows this long first.
+const ENDING_MSECS = 4500;
+
+/** How the last mission ended, for the menu: set when it finishes or is
+ *  lost, cleared when one loads. */
+export const lastResult = { title: '', line: '' };
+
+/** "m:ss" */
+const minutes = (secs: number): string => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+
+/** "N kongs downed in m:ss" */
+function summary(): string {
+  const n = gamestats.get(Stat.MONKEY_DEATHS);
+  return `${n} kong${n === 1 ? '' : 's'} downed in ${minutes(gamestats.get(Stat.GAME_SECONDS))}`;
+}
 
 /** The Giant Claw. Built from <claw>, but nothing calls update() yet, so
  *  its anger never changes. */
@@ -84,8 +99,15 @@ export class Mission extends GameComponent {
   // Set by _load(); the mission is only played once it has loaded.
   private fogplane!: FogPlane;
   private hud!: Container2D;
-  /** The kongs: <kongs> in <startconditions>, or kong.properties' count. */
-  private kongCount: number | null = null;
+  /** The kongs: <kongs> in <startconditions>, else kong.properties. */
+  private kongOptions: TroopOptions = {};
+  /** <patrolradius> in <startconditions>, else game.properties. */
+  private patrolRadius: number | null = null;
+  private tally = new Tally();
+  /** An outcome has ended the mission: the status to take when the banner
+   *  has shown for ENDING_MSECS. */
+  private ending: { status: Status; msecs: number } | null = null;
+  private banner = new Banner();
   kongs: KongTroop | null = null;
   cameraman!: CameraMan;
   player!: Player;
@@ -118,7 +140,7 @@ export class Mission extends GameComponent {
     }
     if (this.countdowntimer) this.hud.add(this.countdowntimer, TOP | RIGHT);
     const pos = this.player.entity.object.position;
-    this.patrol = { x: pos.x, z: pos.z, r: settings.getf('game', 'patrol_radius') || 3200 };
+    this.patrol = { x: pos.x, z: pos.z, r: this.patrolRadius ?? (settings.getf('game', 'patrol_radius') || 3200) };
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
     this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.patrol);
     this.hud.add(this.radar, TOP | RIGHT);
@@ -126,6 +148,8 @@ export class Mission extends GameComponent {
     this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
     this.outMessage.setColor(1, 0.85, 0.3);
     this.outMessage.position.y = 0.1;
+    this.hud.add(this.tally, TOP);
+    this.tally.position.y -= 0.06; // below the pause button
     this.lives = settings.geti('game', 'lives') || 3;
     this.livesDisplay = await LivesDisplay.create(this.lives);
     this.hud.add(this.livesDisplay, TOP | LEFT);
@@ -139,8 +163,9 @@ export class Mission extends GameComponent {
     await grid.generate((p: number) => { this.progress = p; });
     this.world = new World(grid);
     this.world.addEntity(this.player.entity);
-    this.kongs = await KongTroop.create(this.kongCount, this.patrol);
+    this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
     gamestats.reset();
+    lastResult.title = lastResult.line = '';
   }
 
   /** Reads the mission's XML. */
@@ -160,7 +185,22 @@ export class Mission extends GameComponent {
       if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
       if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
     }
-    if (sc.kongs) this.kongCount = parseInt(sc.kongs.textContent ?? '', 10) || 0;
+    // <kongs respawn_msecs="N" health_min="N" health_max="N">count</kongs>,
+    // with respawn_msecs="never" for a fixed number to clear
+    if (sc.kongs) {
+      const k = sc.kongs;
+      const num = (name: string): number | undefined => {
+        const v = parseFloat(k.getAttribute(name) ?? '');
+        return Number.isFinite(v) ? v : undefined;
+      };
+      this.kongOptions = {
+        count: parseInt(k.textContent ?? '', 10) || 0,
+        respawnMsecs: k.getAttribute('respawn_msecs') === 'never' ? null : num('respawn_msecs'),
+        healthMin: num('health_min'),
+        healthMax: num('health_max'),
+      };
+    }
+    if (sc.patrolradius) this.patrolRadius = parseFloat(sc.patrolradius.textContent ?? '') || null;
     this.player = await Player.create(model.name ?? '', model.skin ?? '', startHeight);
     if (sc.countdown) {
       const cd = xmlStringMap(sc.countdown);
@@ -192,7 +232,12 @@ export class Mission extends GameComponent {
 
   private update(msecs: number, input: Input | null): void {
     const world = this.world!;
-    gamestats.addGameTime(msecs);
+    if (this.ending) {
+      this.ending.msecs -= msecs;
+      if (this.ending.msecs <= 0) this.setStatus(this.ending.status);
+    } else {
+      gamestats.addGameTime(msecs); // (the clock stops at the end)
+    }
     this.countdowntimer?.update(gamestats.get(Stat.GAME_SECONDS));
     const plane = this.player.entity;
     if (plane.crashed) {
@@ -201,20 +246,29 @@ export class Mission extends GameComponent {
         if (this.lives > 0) {
           const pos = plane.object.position;
           this.player.respawn(world.grid.maxHeightNear(pos.x, pos.z) + RESPAWN_CLEARANCE, INVULNERABLE_MSECS);
-        } else {
+        } else if (!this.ending) {
+          lastResult.title = 'Game over';
+          lastResult.line = summary();
           this.setStatus(Status.LOST);
         }
       }
     } else if (input) {
       const pos = this.player.entity.object.position;
       const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
-      this.player.read(input, this.speedFor(input.throttle), safe);
+      const c = this.constraints ?? new Constraints();
+      this.player.read(input, c.minSpeed + input.throttle * (c.maxSpeed - c.minSpeed), c.minSpeed, safe);
     }
     const wasCrashed = plane.crashed;
     if (!wasCrashed) this.constraints?.restrict(this.player);
     this.kongs?.update(world, msecs, plane.object);
     world.update(msecs);
-    if (!plane.crashed) this.checkBounds(msecs);
+    if (this.kongs) {
+      gamestats.set(Stat.MONKEY_POPULATION, this.kongs.remaining());
+      this.tally.text = this.kongs.respawns
+        ? `KONGS DOWNED ${gamestats.get(Stat.MONKEY_DEATHS)}`
+        : `KONGS LEFT ${this.kongs.remaining()}`;
+    }
+    if (!plane.crashed && !this.ending) this.checkBounds(msecs);
     if (plane.crashed && !wasCrashed) {
       // it just hit something
       this.lives--;
@@ -260,6 +314,19 @@ export class Mission extends GameComponent {
     this.outMessageMsecs = OUT_MESSAGE_MSECS;
   }
 
+  /** An outcome's result: show `message` (and how it went), then take
+   *  `status`. Once only. */
+  finish(status: Status, message: string): void {
+    if (this.ending || this.status !== Status.PLAYING) return;
+    if (status === Status.PLAYING) return;
+    this.ending = { status, msecs: ENDING_MSECS };
+    this.player.entity.charmed = true;
+    this.outside = 0;
+    lastResult.title = message;
+    lastResult.line = summary();
+    this.banner.set(message, lastResult.line);
+  }
+
   private draw(display: Display, msecs: number): void {
     display.draw2d(this.fogplane);
     display.clearDepth();
@@ -272,7 +339,8 @@ export class Mission extends GameComponent {
       display.draw2d(this.turnBack);
     }
     if (this.outMessageMsecs > 0) display.draw2d(this.outMessage);
-    if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
+    if (this.ending) display.draw2d(this.banner);
+    else if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
     if (msecs) {
       this.fps.update(msecs);
       display.draw2d(fpsOverlay(this.fps));
@@ -286,12 +354,6 @@ export class Mission extends GameComponent {
     this.radar.blips = (this.kongs?.living() ?? []).map((k) => ({ x: k.object.position.x, z: k.object.position.z }));
     this.radar.warn = this.outside > 0 && !this.heading;
     this.radar.update(msecs);
-  }
-
-  /** Throttle (0..1) to speed, within the mission's speed constraints. */
-  private speedFor(throttle: number): number {
-    const c = this.constraints ?? new Constraints();
-    return c.minSpeed + throttle * (c.maxSpeed - c.minSpeed);
   }
 
   override dispose(): void {
