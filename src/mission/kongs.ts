@@ -136,6 +136,8 @@ export class Kong extends Entity {
   private corpse = 0;
   /** Where the roars are heard from (the plane). */
   ear: THREE.Object3D | null = null;
+  /** The patrol area: it heads back in when it strays outside. */
+  home: Area | null = null;
 
   constructor(
     private pose: THREE.Group, // waddles and topples, pivoting at the feet
@@ -163,8 +165,6 @@ export class Kong extends Entity {
   }
 
   isDying(): boolean { return this.dying; }
-
-  isOnWall(): boolean { return this.wall !== null || this.object.position.y > 0.5; }
 
   // ------------------------------------------------------------- shooting
 
@@ -403,7 +403,12 @@ export class Kong extends Entity {
     }
     if (Math.random() < this.cfg.climbChance && this.planClimb(world, x, z)) return;
     const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-    const options = dirs.filter(([dx, dz]) => !this.lastDir || dx !== -this.lastDir[0] || dz !== -this.lastDir[1] || Math.random() < 0.05);
+    let options = dirs.filter(([dx, dz]) => !this.lastDir || dx !== -this.lastDir[0] || dz !== -this.lastDir[1] || Math.random() < 0.05);
+    const home = this.home;
+    if (home && Math.hypot(x - home.x, z - home.z) > home.r * 0.8) {
+      // near the edge of the patrol area: only ways back in
+      options = dirs.filter(([dx, dz]) => dx * (home.x - x) + dz * (home.z - z) > 0);
+    }
     const [dx, dz] = options[Math.floor(Math.random() * options.length)];
     const blocks = Math.random() < 0.3 ? 2 : 1;
     this.lastDir = [dx, dz];
@@ -486,14 +491,15 @@ export class Kong extends Entity {
 
 // ---------------------------------------------------------------- the troop
 
-// Kongs come (and go back to) this far from the plane.
-const SPAWN_NEAR = 700;
-const SPAWN_FAR = 2600;
-const SPAWN_SPREAD = 1.0; // radians either side of the plane's heading
-const SPAWN_APART = 350; // from other kongs
-const RELOCATE_DISTANCE = 8000; // left this far behind: brought back
+/** A circle on the ground: the patrol area. */
+export interface Area { x: number; z: number; r: number }
 
-/** Keeps a few kongs roaming the city round the plane. */
+// Kongs come at crossings in the patrol area at least this far from the
+// plane, and apart from each other.
+const SPAWN_NEAR = 700;
+const SPAWN_APART = 600;
+
+/** Keeps a few kongs roaming the patrol area. */
 export class KongTroop {
   private kongs: Kong[] = [];
   private respawn = 0;
@@ -504,16 +510,18 @@ export class KongTroop {
     private roar: AudioBuffer | null,
     private cfg: KongConfig,
     public count: number,
+    readonly area: Area,
   ) {}
 
-  /** `count`: how many at once (null: kong.properties' count). */
-  static async create(count: number | null): Promise<KongTroop> {
+  /** `count`: how many at once (null: kong.properties' count); they keep
+   *  to `area`. */
+  static async create(count: number | null, area: Area): Promise<KongTroop> {
     const cfg = loadConfig();
     const [proto, roar] = await Promise.all([
       loadModel(cfg.model, cfg.skin),
       loadSound('data/sound/sfx/kong_roar.wav'),
     ]);
-    return new KongTroop(proto, roar, cfg, count ?? cfg.count);
+    return new KongTroop(proto, roar, cfg, count ?? cfg.count, area);
   }
 
   private make(): Kong {
@@ -531,24 +539,25 @@ export class KongTroop {
     return new Kong(pose, material, this.cfg, this.roar);
   }
 
-  /** A crossing at a random spot ahead of the plane, away from other kongs. */
+  /** A crossing in the patrol area, not too near the plane and away from
+   *  other kongs. */
   private spawnPoint(player: THREE.Object3D): [number, number] {
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
-    const heading = Math.atan2(fwd.x, -fwd.z);
-    let best: [number, number] = [0, 0];
-    let bestApart = -1;
-    for (let i = 0; i < 12; i++) {
-      const a = heading + rand(-SPAWN_SPREAD, SPAWN_SPREAD);
-      const d = rand(SPAWN_NEAR, SPAWN_FAR);
-      const x = Math.round((player.position.x + Math.sin(a) * d) / BLOCKSIZE) * BLOCKSIZE;
-      const z = Math.round((player.position.z - Math.cos(a) * d) / BLOCKSIZE) * BLOCKSIZE;
+    const { x: ax, z: az, r } = this.area;
+    let best: [number, number] = [ax, az];
+    let bestScore = -1;
+    for (let i = 0; i < 20; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.sqrt(Math.random()) * r * 0.8;
+      const x = Math.round((ax + Math.sin(a) * d) / BLOCKSIZE) * BLOCKSIZE;
+      const z = Math.round((az + Math.cos(a) * d) / BLOCKSIZE) * BLOCKSIZE;
       let apart = Infinity;
       for (const k of this.kongs) apart = Math.min(apart, Math.hypot(k.object.position.x - x, k.object.position.z - z));
-      if (apart > bestApart) {
+      const score = Math.min(apart / SPAWN_APART, Math.hypot(player.position.x - x, player.position.z - z) / SPAWN_NEAR);
+      if (score > bestScore) {
         best = [x, z];
-        bestApart = apart;
+        bestScore = score;
       }
-      if (apart >= SPAWN_APART) break;
+      if (score >= 1) break;
     }
     return best;
   }
@@ -556,6 +565,7 @@ export class KongTroop {
   private spawn(world: World, player: THREE.Object3D): void {
     const kong = this.make();
     kong.ear = player;
+    kong.home = this.area;
     kong.placeAt(...this.spawnPoint(player));
     this.kongs.push(kong);
     world.addEntity(kong);
@@ -567,15 +577,7 @@ export class KongTroop {
       for (let i = 0; i < this.count; i++) this.spawn(world, player);
     }
     this.kongs = this.kongs.filter((k) => !k.isDead());
-    let alive = 0;
-    for (const k of this.kongs) {
-      if (k.isDying()) continue;
-      alive++;
-      const p = k.object.position;
-      if (!k.isOnWall() && Math.hypot(p.x - player.position.x, p.z - player.position.z) > RELOCATE_DISTANCE) {
-        k.placeAt(...this.spawnPoint(player));
-      }
-    }
+    const alive = this.living().length;
     if (alive >= this.count) {
       this.respawn = this.cfg.respawnMsecs;
     } else {

@@ -397,11 +397,12 @@ function poly(cx: number, cz: number, r: number, sides: number, phase = Math.PI 
  * Walls between two rings of corners (same count), from y0 to y1: straight
  * walls when the rings match, a tapering frustum otherwise. With a window
  * size, the walls are textured a whole number of windows across and one
- * floor per window, v=0 at the top.
+ * floor per window, v=0 at the top. Not `closed`: an open run of walls,
+ * with no wall from the last corner back to the first.
  */
-function walls(gb: Builder, lower: Corner[], upper: Corner[], y0: number, y1: number, ws = 0): void {
+function walls(gb: Builder, lower: Corner[], upper: Corner[], y0: number, y1: number, ws = 0, closed = true): void {
   const n = lower.length;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < (closed ? n : n - 1); i++) {
     const a0 = lower[i];
     const b0 = lower[(i + 1) % n];
     const a1 = upper[i];
@@ -515,9 +516,16 @@ function cornice(gb: Builder, cx: number, cz: number, hx: number, hz: number, y:
   const x1 = cx + hx + side('+x');
   const z0 = cz - hz - side('-z');
   const z1 = cz + hz + side('+z');
-  const outer = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
+  const outer: Corner[] = [[x0, z1], [x1, z1], [x1, z0], [x0, z0]];
   gb.color = color;
-  walls(gb, outer, outer, y - depth, y);
+  // The band, except on shared sides: there it would lie in the plane of
+  // the building's own wall and z-fight with it wherever the neighbour is
+  // lower. (rect() order: the edges run +z, +x, -z, -x.)
+  const edges: Side[] = ['+z', '+x', '-z', '-x'];
+  for (let i = 0; i < 4; i++) {
+    if (flush.includes(edges[i])) continue;
+    walls(gb, [outer[i], outer[(i + 1) % 4]], [outer[i], outer[(i + 1) % 4]], y - depth, y, 0, false);
+  }
   const P = (p: Corner): Vertex => [p[0], y, p[1], 0, 0];
   for (let i = 0; i < 4; i++) {
     const j = (i + 1) % 4;

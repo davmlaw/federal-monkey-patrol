@@ -175,6 +175,12 @@ export class Projectile extends Entity {
   }
 }
 
+// Bullets leave the plane this fast (on top of its own speed) and last this
+// long: a range of a few blocks. (2006: 150 units/s for a second, which the
+// plane outran at any speed, so they never reached the buildings.)
+const BULLET_SPEED = 1500;
+const BULLET_MSECS = 1000;
+
 // Propeller spin, radians per second: idling plus some per unit of speed.
 const PROP_IDLE = 14;
 const PROP_PER_SPEED = 0.12;
@@ -279,7 +285,7 @@ export class Plane extends Entity {
     if (!(this.firing && this.reloadTime <= 0)) return;
     let movement: THREE.Vector3;
     if (this.firing === 1) {
-      movement = new THREE.Vector3(0, 0, -150); // "bullet"
+      movement = new THREE.Vector3(0, 0, -BULLET_SPEED); // "bullet"
       gamestats.inc(Stat.BULLETS_FIRED);
     } else {
       movement = new THREE.Vector3(0, -100, 0); // "bomb"
@@ -294,7 +300,7 @@ export class Plane extends Entity {
       bomb.object.position.copy(this.object.position).addScaledVector(offset, sign);
       bomb.object.quaternion.copy(this.object.quaternion);
       bomb.velocity.copy(this.velocity).add(movement);
-      bomb.setLifetime(this.firing === 1 ? 1000 : 5000);
+      bomb.setLifetime(this.firing === 1 ? BULLET_MSECS : 5000);
       bomb.bomb = this.firing === 2;
       world.addEntity(bomb);
     }
@@ -458,6 +464,16 @@ export class Player {
     p.invulnerable = invulnerable;
     p.object.visible = true;
     this.setMode(this.mode);
+  }
+
+  /** Turn the plane round to `yaw` (radians, as yawPitch() measures it),
+   *  level, and safe from collisions for `invulnerable` milliseconds. */
+  turnTo(yaw: number, invulnerable: number): void {
+    const p = this.entity;
+    p.object.quaternion.setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'));
+    if (p.bank) p.bank.rotation.set(0, 0, 0);
+    for (const c of this.controllers) c.reset();
+    p.invulnerable = invulnerable;
   }
 
   /** speed: the throttle, already mapped to the mission's speed range;

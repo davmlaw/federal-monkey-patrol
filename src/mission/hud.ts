@@ -1,9 +1,9 @@
-// HUD widgets: FogPlane, CountDownTimer, ClawAlert, the FPS readout, and
-// the "generating skyscrapers" LoadBar.
+// HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
+// TurnBack, the FPS readout, and the "generating skyscrapers" LoadBar.
 
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
 import {
-  Container2D, Drawable2D, Image, LEFT, Quad, Text2D, Transitional2D, textHeight, type Batch2D, type Color, type Point,
+  Container2D, Drawable2D, Image, LEFT, Quad, Text2D, Transitional2D, textHeight, textWidth, type Batch2D, type Color, type Point,
 } from '../core/draw2d.ts';
 import { loadProperties, hexcolor, type RGBA } from '../core/settings.ts';
 import { MTRand } from '../core/mtrand.ts';
@@ -102,6 +102,121 @@ export class LivesDisplay extends Drawable2D {
       this.head.position = { x: this.left() + step * (i + 0.5), y: 0 };
       this.head.draw(g, alpha);
     }
+  }
+}
+
+/** Something to show on the radar, in world coordinates. */
+export interface Blip { x: number; z: number }
+
+const RADAR_SEGMENTS = 48;
+
+/**
+ * A round radar, heading up, centred on the plane: the kongs as dots (ones
+ * out of range sit on the rim, so it always shows which way to go) and the
+ * edge of the patrol area as a ring.
+ */
+export class Radar extends Drawable2D {
+  /** The plane's position and heading (radians, as world.ts measures it:
+   *  0 is -Z, increasing anticlockwise seen from above). */
+  plane = { x: 0, z: 0, yaw: 0 };
+  blips: Blip[] = [];
+  /** Blink the ring (out of bounds). */
+  warn = false;
+  private clock = 0;
+
+  /** `size`: across, in ortho units; `range`: world units to the rim. */
+  constructor(size: number, public range: number, public area: { x: number; z: number; r: number }) {
+    super(size, size);
+  }
+
+  update(msecs: number): void { this.clock += msecs; }
+
+  /** World (x, z) to radar coordinates (y up = ahead), unclamped. */
+  private toRadar(x: number, z: number): [number, number] {
+    const R = this.getWidth() / 2;
+    const dx = x - this.plane.x;
+    const dz = z - this.plane.z;
+    // rotate so the heading points up the screen
+    const c = Math.cos(this.plane.yaw);
+    const s = Math.sin(this.plane.yaw);
+    const right = dx * c - dz * s;
+    const ahead = -dx * s - dz * c;
+    return [right / this.range * R, ahead / this.range * R];
+  }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    const R = this.getWidth() / 2;
+    const circle = (r: number): Point[] => Array.from({ length: RADAR_SEGMENTS }, (_, i) => {
+      const a = (i / RADAR_SEGMENTS) * Math.PI * 2;
+      return [Math.cos(a) * r, Math.sin(a) * r];
+    });
+    // the scope
+    const rim = circle(R);
+    const disc: Point[] = [];
+    for (let i = 0; i < rim.length; i++) disc.push([0, 0], rim[i], rim[(i + 1) % rim.length]);
+    g.triangles(disc, [0.05, 0.06, 0.05, 0.55 * alpha]);
+    g.polyline(circle(R * 0.5), 0.0015, [0.7, 0.75, 0.7, 0.25 * alpha], true);
+    // the patrol area's edge, where it falls inside the scope
+    const blink = Math.floor(this.clock / 250) % 2 === 0;
+    const edge: Color = this.warn && blink ? [1, 0.35, 0.25, alpha] : [0.85, 0.8, 0.6, 0.7 * alpha];
+    let run: Point[] = [];
+    const flush = (): void => {
+      if (run.length > 1) g.polyline(run, 0.002, edge);
+      run = [];
+    };
+    const n = 128;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const [px, py] = this.toRadar(this.area.x + Math.sin(a) * this.area.r, this.area.z + Math.cos(a) * this.area.r);
+      if (Math.hypot(px, py) <= R) run.push([px, py]);
+      else flush();
+    }
+    flush();
+    g.polyline(rim, 0.003, [0.8, 0.8, 0.75, 0.8 * alpha], true);
+    // the kongs
+    const dot = R * 0.07;
+    for (const b of this.blips) {
+      let [px, py] = this.toRadar(b.x, b.z);
+      const d = Math.hypot(px, py);
+      const far = d > R - dot;
+      if (far) {
+        px *= (R - dot) / d;
+        py *= (R - dot) / d;
+      }
+      g.push();
+      g.translate(px, py);
+      g.quad(dot * 2, dot * 2, far ? [0.95, 0.55, 0.3, 0.7 * alpha] : [1, 0.4, 0.25, alpha]);
+      g.pop();
+    }
+    // the plane, pointing up
+    const p = R * 0.1;
+    g.triangles([[0, p * 1.2], [-p * 0.7, -p * 0.8], [p * 0.7, -p * 0.8]], [1, 1, 1, alpha]);
+  }
+}
+
+/** The out-of-bounds warning: "TURN BACK!" and the seconds left, blinking. */
+export class TurnBack extends Drawable2D {
+  private title = new Text2D('TURN BACK!', 0.45);
+  private line = new Text2D('', 0.2);
+  /** Seconds left (shown rounded up). */
+  secondsLeft = 0;
+  private clock = 0;
+
+  constructor() {
+    super();
+    this.title.setColor(1, 0.85, 0.3);
+    this.title.position.y = 0.03;
+  }
+
+  update(msecs: number): void { this.clock += msecs; }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    if (Math.floor(this.clock / 400) % 2 === 0) this.title.draw(g, alpha);
+    const s = Math.ceil(this.secondsLeft);
+    this.line.text = `Leaving the patrol area: ${s} second${s === 1 ? '' : 's'}`;
+    this.line.setWidth(textWidth(this.line.text) * this.line.font);
+    this.line.position.y = -0.04;
+    this.line.draw(g, alpha);
   }
 }
 
