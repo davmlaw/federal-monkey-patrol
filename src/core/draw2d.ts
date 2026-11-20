@@ -1,9 +1,9 @@
-// 2D drawing: an immediate-mode batcher standing in for the original's
-// glBegin()/glEnd() ortho drawing, plus ports of graphics/2d/ (Drawable2D,
-// Quad, Image, Container2D, Text2D, WordList2D).
+// 2D drawing: an immediate-mode batcher for the ortho 2D space, plus a
+// small scene graph on top of it (Drawable2D, Quad, Image, Container2D,
+// Text2D in the bitmap font, WordList2D).
 
 import * as THREE from 'three';
-import { loadTexture } from './assets.js';
+import { loadTexture } from './assets.ts';
 
 const ORTHO_W = 1.0;
 const ORTHO_H = 0.75;
@@ -36,10 +36,22 @@ void main() {
 const MODE_COLOR = 0;
 const MODE_TEXTURE = 1;
 const MODE_SCREEN = 2;
+type Mode = typeof MODE_COLOR | typeof MODE_TEXTURE | typeof MODE_SCREEN;
 
-/** Blend modes: 'normal' = GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA (Display default),
- *  'premult' = GL_ONE/GL_ONE_MINUS_SRC_ALPHA (Text2D). */
-function makeMaterial(blend) {
+/** [r, g, b, a], 0..1. */
+export type Color = number[];
+/** [x, y] or [x, y, u, v]. */
+export type Point = number[];
+export type Blend = 'normal' | 'premult';
+
+interface Batch { mode: Mode; tex: THREE.Texture | null; blend: Blend; start: number; count: number }
+type Material2D = THREE.ShaderMaterial & {
+  uniforms: { map: THREE.IUniform<THREE.Texture | null>; mode: THREE.IUniform<number> };
+};
+
+/** Blend modes: 'normal' = src alpha / one minus src alpha,
+ *  'premult' = one / one minus src alpha (Text2D). */
+function makeMaterial(blend: Blend): Material2D {
   return new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
@@ -52,24 +64,33 @@ function makeMaterial(blend) {
     blendEquation: THREE.AddEquation,
     blendSrc: blend === 'premult' ? THREE.OneFactor : THREE.SrcAlphaFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
-  });
+  }) as Material2D;
 }
 
 export class Batch2D {
-  constructor(renderer) {
-    this.renderer = renderer;
-    this.capacity = 0;
-    this.materials = { normal: makeMaterial('normal'), premult: makeMaterial('premult') };
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.Camera();
+  private capacity = 0;
+  private materials: Record<Blend, Material2D> = { normal: makeMaterial('normal'), premult: makeMaterial('premult') };
+  private scene = new THREE.Scene();
+  private camera = new THREE.Camera();
+  private mesh: THREE.Mesh<THREE.BufferGeometry, Material2D>;
+  private pos = new Float32Array(0);
+  private uv = new Float32Array(0);
+  private col = new Float32Array(0);
+  private count = 0;
+  private batches: Batch[] = [];
+  private stack: number[][] = [];
+  /** affine: x' = a x + c y + e, y' = b x + d y + f */
+  private m = [1, 0, 0, 1, 0, 0];
+  blend: Blend = 'normal';
+
+  constructor(private renderer: THREE.WebGLRenderer) {
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.materials.normal);
     this.mesh.frustumCulled = false;
     this.scene.add(this.mesh);
     this.ensure(4096);
-    this.blend = 'normal';
   }
 
-  ensure(n) {
+  private ensure(n: number): void {
     if (n <= this.capacity) return;
     let cap = Math.max(this.capacity, 1024);
     while (cap < n) cap *= 2;
@@ -79,9 +100,11 @@ export class Batch2D {
     this.uv = new Float32Array(cap * 2);
     this.col = new Float32Array(cap * 4);
     if (this.count && old) {
-      this.pos.set(old.getAttribute('position').array.subarray(0, this.count * 3));
-      this.uv.set(old.getAttribute('uv').array.subarray(0, this.count * 2));
-      this.col.set(old.getAttribute('rgba').array.subarray(0, this.count * 4));
+      const prev = (name: string, n: number): Float32Array =>
+        (old.getAttribute(name).array as Float32Array).subarray(0, this.count * n);
+      this.pos.set(prev('position', 3));
+      this.uv.set(prev('uv', 2));
+      this.col.set(prev('rgba', 4));
     }
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('uv', new THREE.BufferAttribute(this.uv, 2).setUsage(THREE.DynamicDrawUsage));
@@ -91,27 +114,27 @@ export class Batch2D {
     this.capacity = cap;
   }
 
-  begin() {
+  begin(): void {
     this.count = 0;
     this.batches = [];
     this.stack = [];
-    this.m = [1, 0, 0, 1, 0, 0]; // affine: x' = a x + c y + e, y' = b x + d y + f
+    this.m = [1, 0, 0, 1, 0, 0];
     this.blend = 'normal';
   }
 
   // --------------------------------------------------------- transforms
-  push() { this.stack.push(this.m.slice()); }
+  push(): void { this.stack.push(this.m.slice()); }
 
-  pop() { this.m = this.stack.pop(); }
+  pop(): void { this.m = this.stack.pop() ?? [1, 0, 0, 1, 0, 0]; }
 
-  translate(x, y) {
+  translate(x: number, y: number): void {
     const m = this.m;
     m[4] += m[0] * x + m[2] * y;
     m[5] += m[1] * x + m[3] * y;
   }
 
-  /** Degrees, anticlockwise (glRotatef about +Z). */
-  rotate(deg) {
+  /** Degrees, anticlockwise. */
+  rotate(deg: number): void {
     if (!deg) return;
     const r = deg * Math.PI / 180;
     const c = Math.cos(r);
@@ -123,19 +146,19 @@ export class Batch2D {
     this.m[3] = -b * s + d * c;
   }
 
-  setBlend(b) { this.blend = b; }
+  setBlend(b: Blend): void { this.blend = b; }
 
   // ------------------------------------------------------------ geometry
-  batchFor(mode, tex, n) {
+  private batchFor(mode: Mode, tex: THREE.Texture | null, n: number): Batch {
     this.ensure(this.count + n);
     const last = this.batches[this.batches.length - 1];
     if (last && last.mode === mode && last.tex === tex && last.blend === this.blend) return last;
-    const b = { mode, tex, blend: this.blend, start: this.count, count: 0 };
+    const b: Batch = { mode, tex, blend: this.blend, start: this.count, count: 0 };
     this.batches.push(b);
     return b;
   }
 
-  vertex(x, y, u, v, c) {
+  private vertex(x: number, y: number, u: number, v: number, c: Color): void {
     const m = this.m;
     const i = this.count++;
     this.pos[i * 3] = m[0] * x + m[2] * y + m[4];
@@ -147,14 +170,15 @@ export class Batch2D {
   }
 
   /** Triangles from a flat list of [x, y, u, v] points (3 per triangle). */
-  triangles(points, color, tex = null, mode = tex ? MODE_TEXTURE : MODE_COLOR) {
+  triangles(points: Point[], color: Color, tex: THREE.Texture | null = null,
+    mode: Mode = tex ? MODE_TEXTURE : MODE_COLOR): void {
     const b = this.batchFor(mode, tex, points.length);
     for (const p of points) this.vertex(p[0], p[1], p[2] || 0, p[3] || 0, color);
     b.count += points.length;
   }
 
   /** Quad of size w x h centred on the origin, texcoords (u0,v0) top-left. */
-  quad(w, h, color, tex = null, uv = [0, 0, 1, 1]) {
+  quad(w: number, h: number, color: Color, tex: THREE.Texture | null = null, uv = [0, 0, 1, 1]): void {
     const hw = w / 2;
     const hh = h / 2;
     const [u0, v0, u1, v1] = uv;
@@ -166,15 +190,16 @@ export class Batch2D {
   }
 
   /** Axis-aligned rectangle by corners (no texture). */
-  rect(x0, y0, x1, y1, color, tex = null, mode) {
+  rect(x0: number, y0: number, x1: number, y1: number, color: Color,
+    tex: THREE.Texture | null = null, mode?: Mode): void {
     this.triangles([[x0, y1], [x0, y0], [x1, y0], [x0, y1], [x1, y0], [x1, y1]], color, tex, mode);
   }
 
-  /** A thick line strip (GL_LINE_STRIP / GL_LINE_LOOP with glLineWidth). */
-  polyline(pts, width, color, closed = false) {
+  /** A thick line strip (a loop if `closed`). */
+  polyline(pts: Point[], width: number, color: Color, closed = false): void {
     const hw = width / 2;
     const n = closed ? pts.length : pts.length - 1;
-    const tris = [];
+    const tris: Point[] = [];
     for (let i = 0; i < n; i++) {
       const [x0, y0] = pts[i];
       const [x1, y1] = pts[(i + 1) % pts.length];
@@ -196,15 +221,15 @@ export class Batch2D {
   }
 
   /** Triangles that show `rtTexture` (a full-view render) where they cover. */
-  screenTriangles(points, rtTexture) {
+  screenTriangles(points: Point[], rtTexture: THREE.Texture): void {
     this.triangles(points, [1, 1, 1, 1], rtTexture, MODE_SCREEN);
   }
 
-  flush() {
+  flush(): void {
     if (!this.count) return;
     const g = this.mesh.geometry;
     for (const name of ['position', 'uv', 'rgba']) {
-      const a = g.getAttribute(name);
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
       a.clearUpdateRanges();
       a.addUpdateRange(0, this.count * a.itemSize);
       a.needsUpdate = true;
@@ -226,39 +251,44 @@ export class Batch2D {
 
 // =================================================================== Drawable2D
 
+export interface Vec2 { x: number; y: number }
+
 export class Drawable2D {
+  position: Vec2 = { x: 0, y: 0 };
+  size: Vec2;
+  /** Degrees, anticlockwise. */
+  rotation = 0;
+  color: Color = [1, 1, 1, 1];
+
   constructor(w = 0, h = 0) {
-    this.position = { x: 0, y: 0 };
     this.size = { x: w, y: h };
-    this.rotation = 0;
-    this.color = [1, 1, 1, 1];
   }
 
-  getWidth() { return this.size.x; }
+  getWidth(): number { return this.size.x; }
 
-  getHeight() { return this.size.y; }
+  getHeight(): number { return this.size.y; }
 
-  setWidth(w) { this.size.x = w; }
+  setWidth(w: number): void { this.size.x = w; }
 
-  setHeight(h) { this.size.y = h; }
+  setHeight(h: number): void { this.size.y = h; }
 
-  setColor(r, g, b, a = 1) {
-    if (Array.isArray(r)) this.color = r.slice(0, 4);
-    else this.color = [r, g, b, a];
+  setColor(r: number | readonly number[], g = 0, b = 0, a = 1): void {
+    if (typeof r === 'number') this.color = [r, g, b, a];
+    else this.color = r.slice(0, 4);
   }
 
-  left() { return this.size.x * -0.5; }
+  left(): number { return this.size.x * -0.5; }
 
-  right() { return this.size.x * 0.5; }
+  right(): number { return this.size.x * 0.5; }
 
-  top() { return this.size.y * 0.5; }
+  top(): number { return this.size.y * 0.5; }
 
-  bottom() { return this.size.y * -0.5; }
+  bottom(): number { return this.size.y * -0.5; }
 
-  /** The glColor4f() this node sets before representation(). */
-  glColor(alpha) { return [this.color[0], this.color[1], this.color[2], alpha]; }
+  /** This node's colour with the given alpha. */
+  glColor(alpha: number): Color { return [this.color[0], this.color[1], this.color[2], alpha]; }
 
-  draw(g, alpha = 1) {
+  draw(g: Batch2D, alpha = 1): void {
     g.push();
     g.translate(this.position.x, this.position.y);
     g.rotate(this.rotation);
@@ -267,52 +297,49 @@ export class Drawable2D {
     g.pop();
   }
 
-  representation() {}
+  protected representation(_g: Batch2D, _alpha: number): void {}
 }
 
-/** A Drawable2D with a state in [0, 1] (util/flux.h). */
+/** A Drawable2D with a state in [0, 1]. */
 export class Transitional2D extends Drawable2D {
-  constructor(w, h) {
-    super(w, h);
-    this.state = 0;
-  }
+  state = 0;
 
-  getState() { return this.state; }
+  getState(): number { return this.state; }
 
-  setState(s) { this.state = Math.min(1, Math.max(0, s)); }
+  setState(s: number): void { this.state = Math.min(1, Math.max(0, s)); }
 }
 
 export class Quad extends Drawable2D {
-  representation(g, alpha) {
+  protected override representation(g: Batch2D, alpha: number): void {
     g.quad(this.size.x, this.size.y, this.glColor(alpha));
   }
 }
 
 export class Image extends Quad {
   /** `tex` must already be loaded (see Image.load). */
-  constructor(tex, w = 1, h = 1) {
+  aspectLock = true;
+
+  constructor(public tex: THREE.Texture, w = 1, h = 1) {
     super(w, h);
-    this.tex = tex;
-    this.aspectLock = true;
   }
 
-  static async load(path, w, h) {
+  static async load(path: string, w?: number, h?: number): Promise<Image> {
     return new Image(await loadTexture(path), w, h);
   }
 
-  aspectRatio() { return this.tex.userData.aspectRatio || 1; }
+  aspectRatio(): number { return (this.tex.userData.aspectRatio as number) || 1; }
 
-  setWidth(w) {
+  override setWidth(w: number): void {
     this.size.x = w;
     if (this.aspectLock) this.size.y = w / this.aspectRatio();
   }
 
-  setHeight(h) {
+  override setHeight(h: number): void {
     this.size.y = h;
     if (this.aspectLock) this.size.x = h * this.aspectRatio();
   }
 
-  representation(g, alpha) {
+  protected override representation(g: Batch2D, alpha: number): void {
     g.quad(this.size.x, this.size.y, this.glColor(alpha), this.tex);
   }
 }
@@ -323,12 +350,9 @@ export const TOP = 4;
 export const BOTTOM = 8;
 
 export class Container2D extends Drawable2D {
-  constructor(w, h) {
-    super(w, h);
-    this.children = [];
-  }
+  children: Drawable2D[] = [];
 
-  add(d, alignment = 0) {
+  add(d: Drawable2D, alignment = 0): void {
     if (alignment) {
       const hw = d.getWidth() / 2;
       const hh = d.getHeight() / 2;
@@ -340,7 +364,7 @@ export class Container2D extends Drawable2D {
     this.children.push(d);
   }
 
-  representation(g, alpha) {
+  protected override representation(g: Batch2D, alpha: number): void {
     for (const c of this.children) c.draw(g, alpha);
   }
 }
@@ -348,7 +372,7 @@ export class Container2D extends Drawable2D {
 // ======================================================================= Text2D
 
 // Glyph rectangles in data/images/newchars_alpha.png (512x512), for '!'..'~'.
-// From legacy/src/graphics/2d/text2d.cpp (originally from Cube's gl_text.cpp).
+// (The table is originally from Cube's gl_text.cpp.)
 const CHAR_COORDS = [
   [0, 0, 25, 64], [25, 0, 54, 64], [54, 0, 107, 64], [107, 0, 148, 64], [148, 0, 217, 64],
   [217, 0, 263, 64], [263, 0, 280, 64], [280, 0, 309, 64], [309, 0, 338, 64], [338, 0, 379, 64],
@@ -377,7 +401,7 @@ const TEXT_SPACING = 0.001;
 const BANG = 33; // '!'
 const TILDE = 126; // '~'
 
-function characterWidth(c) {
+function characterWidth(c: number): number {
   if (c === 9) return TAB_DIST;
   if (c === 32) return SPACE_DIST;
   if (c >= BANG && c <= TILDE) {
@@ -387,7 +411,7 @@ function characterWidth(c) {
   return 0;
 }
 
-function characterHeight(c) {
+function characterHeight(c: number): number {
   if (c >= BANG && c <= TILDE) {
     const r = CHAR_COORDS[c - BANG];
     return (r[3] - r[1]) / IMAGE_W;
@@ -395,41 +419,39 @@ function characterHeight(c) {
   return 0;
 }
 
-export function textWidth(str) {
+export function textWidth(str: string): number {
   let w = 0;
   for (let i = 0; i < str.length; i++) w += characterWidth(str.charCodeAt(i)) + TEXT_SPACING;
   return w;
 }
 
-export function textHeight(str) {
+export function textHeight(str: string): number {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = Math.max(h, characterHeight(str.charCodeAt(i)));
   return h;
 }
 
-let fontTexture = null;
+let fontTexture: THREE.Texture | null = null;
 
 /** Load the bitmap font once, before any Text2D is drawn. */
-export async function loadFont() {
+export async function loadFont(): Promise<void> {
   fontTexture = await loadTexture('data/images/newchars_alpha.png');
 }
 
 export class Text2D extends Drawable2D {
-  constructor(text, font) {
+  constructor(public text: string, public font: number) {
     super();
-    this.text = text;
-    this.font = font;
     this.setWidth(textWidth(text) * font);
     this.setHeight(textHeight(text) * font);
   }
 
-  representation(g, alpha) {
+  protected override representation(g: Batch2D, alpha: number): void {
     const str = this.text;
     const font = this.font;
     const color = this.glColor(alpha);
     let xp = -this.getWidth() / 2;
     const yp = this.getHeight() / 2;
-    const tris = [];
+    const tris: Point[] = [];
     for (let i = 0; i < str.length; i++) {
       let c = str.charCodeAt(i);
       const w = characterWidth(c) * font;
@@ -451,7 +473,7 @@ export class Text2D extends Drawable2D {
     }
     if (!tris.length) return;
     const prev = g.blend;
-    g.setBlend('premult'); // glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+    g.setBlend('premult');
     g.triangles(tris, color, fontTexture);
     g.setBlend(prev);
   }
@@ -464,13 +486,14 @@ const LINE_SPACING = 0.005;
 
 /** Word-wrapped text. words[0] is the speaker ("Harlow:") and is skipped. */
 export class WordList2D extends Drawable2D {
-  constructor(w, h, words) {
+  lines: Text2D[] = [];
+  wordCount = 0;
+
+  constructor(w: number, h: number, words: string[]) {
     super(w, h);
-    this.lines = [];
     const spaceLength = textWidth(' ') * WORDLIST_FONT;
     let lineLength = 0;
     let line = '';
-    this.wordCount = 0;
     for (let i = 1; i < words.length; i++, this.wordCount++) {
       const wordLength = textWidth(words[i]) * WORDLIST_FONT;
       if (lineLength + wordLength > this.getWidth()) {
@@ -490,9 +513,9 @@ export class WordList2D extends Drawable2D {
     }
   }
 
-  getWordCount() { return this.wordCount; }
+  getWordCount(): number { return this.wordCount; }
 
-  representation(g, alpha) {
+  protected override representation(g: Batch2D, alpha: number): void {
     for (const t of this.lines) t.draw(g, alpha);
   }
 }

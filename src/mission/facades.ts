@@ -1,12 +1,10 @@
-// Procedural textures for the city (new, not in the 2006 version, which used
-// photos: win_brick.jpg for every wall and city_block_base.png for the
-// streets). Everything is painted on a canvas from a seeded random number
-// generator, so it is the same every run.
+// Procedural textures for the city. Everything is painted on a canvas from
+// a seeded random number generator, so it is the same every run.
 //
 // Facades are one texture array (one layer per kind of wall), so a whole
 // patch of the city is one draw call. Each layer is a tile of 4 x 4 window
 // "bays"; walls are mapped so every face starts and ends on a bay boundary
-// and every floor lines up with a row (see city.js).
+// and every floor lines up with a row (see city.ts).
 
 import * as THREE from 'three';
 
@@ -29,10 +27,22 @@ export const Facade = {
   STOREFRONT: 10, // 4 rows of 1-floor shop fronts
   LOBBY: 11, // 2 variants of a 2-floor stone base
   ROOF: 12,
-};
+} as const;
+export type Facade = (typeof Facade)[keyof typeof Facade];
 const NUM_LAYERS = 13;
 
-function rng(seed) {
+type RGB = readonly number[];
+type Ctx = CanvasRenderingContext2D;
+
+interface Rng {
+  next(): number;
+  range(lo: number, hi: number): number;
+  int(n: number): number;
+  chance(p: number): boolean;
+  pick<T>(arr: readonly T[]): T;
+}
+
+function rng(seed: number): Rng {
   let a = seed >>> 0;
   const next = () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -43,18 +53,19 @@ function rng(seed) {
   };
   return {
     next,
-    range: (lo, hi) => lo + next() * (hi - lo),
-    int: (n) => Math.floor(next() * n),
-    chance: (p) => next() < p,
-    pick: (arr) => arr[Math.floor(next() * arr.length)],
+    range: (lo: number, hi: number) => lo + next() * (hi - lo),
+    int: (n: number) => Math.floor(next() * n),
+    chance: (p: number) => next() < p,
+    pick: <T>(arr: readonly T[]): T => arr[Math.floor(next() * arr.length)],
   };
 }
 
-const rgb = (c, k = 1) => `rgb(${c.map((v) => Math.max(0, Math.min(255, Math.round(v * k)))).join(',')})`;
-const jitter = (r, c, amount) => c.map((v) => v * (1 + r.range(-amount, amount)));
+const rgb = (c: RGB, k = 1): string => `rgb(${c.map((v) => Math.max(0, Math.min(255, Math.round(v * k)))).join(',')})`;
+const jitter = (r: Rng, c: RGB, amount: number): number[] => c.map((v) => v * (1 + r.range(-amount, amount)));
 
 /** Fill with a colour plus speckle noise. */
-function speckle(ctx, r, x, y, w, h, base, amount = 0.12, density = 0.004) {
+function speckle(ctx: Ctx, r: Rng, x: number, y: number, w: number, h: number, base: RGB,
+  amount = 0.12, density = 0.004): void {
   ctx.fillStyle = rgb(base);
   ctx.fillRect(x, y, w, h);
   const n = Math.round(w * h * density);
@@ -65,7 +76,7 @@ function speckle(ctx, r, x, y, w, h, base, amount = 0.12, density = 0.004) {
 }
 
 /** Brick: courses with mortar, each brick slightly different. */
-function brick(ctx, r, x, y, w, h, base, mortar) {
+function brick(ctx: Ctx, r: Rng, x: number, y: number, w: number, h: number, base: RGB, mortar: RGB): void {
   ctx.fillStyle = rgb(mortar);
   ctx.fillRect(x, y, w, h);
   const bh = 5;
@@ -79,7 +90,7 @@ function brick(ctx, r, x, y, w, h, base, mortar) {
 }
 
 /** Ashlar stone: big blocks with faint joints. */
-function stone(ctx, r, x, y, w, h, base, course = 16) {
+function stone(ctx: Ctx, r: Rng, x: number, y: number, w: number, h: number, base: RGB, course = 16): void {
   speckle(ctx, r, x, y, w, h, base, 0.05, 0.01);
   ctx.fillStyle = rgb(base, 0.86);
   for (let yy = y + course; yy < y + h; yy += course) ctx.fillRect(x, yy, w, 1);
@@ -92,7 +103,10 @@ function stone(ctx, r, x, y, w, h, base, course = 16) {
  * A window pane: dark glass with a sky reflection, or blinds, curtains or a
  * lamp on inside. `bars` = [columns, rows] of glazing bars.
  */
-function glass(ctx, r, x, y, w, h, { bars = [1, 2], frame = [225, 222, 210], lit = 0.06 } = {}) {
+interface GlassOptions { bars?: readonly number[]; frame?: RGB; lit?: number }
+
+function glass(ctx: Ctx, r: Rng, x: number, y: number, w: number, h: number,
+  { bars = [1, 2], frame = [225, 222, 210], lit = 0.06 }: GlassOptions = {}): void {
   const kind = r.next();
   const g = ctx.createLinearGradient(x, y, x + w * 0.4, y + h);
   if (kind < lit) {
@@ -120,13 +134,16 @@ function glass(ctx, r, x, y, w, h, { bars = [1, 2], frame = [225, 222, 210], lit
 }
 
 /** Each bay of the tile, with its pixel rectangle. */
-function eachBay(f) {
+function eachBay(f: (x: number, y: number, bx: number, fy: number) => void): void {
   for (let fy = 0; fy < BAYS; fy++) for (let bx = 0; bx < BAYS; bx++) f(bx * B, fy * B, bx, fy);
 }
 
 // ------------------------------------------------------------- the layers
 
-function brickWall(ctx, r, base, mortar, { pairs = false, lintel = [205, 196, 178], frame, lit } = {}) {
+interface BrickWallOptions { pairs?: boolean; lintel?: RGB; frame?: RGB; lit?: number }
+
+function brickWall(ctx: Ctx, r: Rng, base: RGB, mortar: RGB,
+  { pairs = false, lintel = [205, 196, 178], frame, lit }: BrickWallOptions = {}): void {
   brick(ctx, r, 0, 0, TILE, TILE, base, mortar);
   eachBay((x, y) => {
     const w = B * (pairs ? 0.3 : 0.44);
@@ -142,7 +159,7 @@ function brickWall(ctx, r, base, mortar, { pairs = false, lintel = [205, 196, 17
   });
 }
 
-function decoLimestone(ctx, r) {
+function decoLimestone(ctx: Ctx, r: Rng): void {
   stone(ctx, r, 0, 0, TILE, TILE, [214, 206, 188], 32);
   eachBay((x, y) => {
     // windows between continuous piers, dark spandrel panels below them
@@ -158,7 +175,7 @@ function decoLimestone(ctx, r) {
   for (let i = 0; i <= BAYS; i++) ctx.fillRect(i * B - 3, 0, 6, TILE);
 }
 
-function terracotta(ctx, r) {
+function terracotta(ctx: Ctx, r: Rng): void {
   speckle(ctx, r, 0, 0, TILE, TILE, [226, 210, 178], 0.05, 0.01);
   eachBay((x, y) => {
     const w = B * 0.5;
@@ -175,7 +192,7 @@ function terracotta(ctx, r) {
   for (let i = 0; i <= BAYS; i++) ctx.fillRect(i * B - 5, 0, 10, TILE);
 }
 
-function gothic(ctx, r) {
+function gothic(ctx: Ctx, r: Rng): void {
   stone(ctx, r, 0, 0, TILE, TILE, [168, 168, 166], 20);
   eachBay((x, y) => {
     const w = B * 0.36;
@@ -198,7 +215,7 @@ function gothic(ctx, r) {
   for (let i = 0; i <= BAYS; i++) ctx.fillRect(i * B - 4, 0, 8, TILE);
 }
 
-function tenement(ctx, r) {
+function tenement(ctx: Ctx, r: Rng): void {
   brickWall(ctx, r, [150, 70, 52], [176, 160, 146]);
   // fire escape over the middle two bays: a balcony per floor, ladders
   ctx.fillStyle = rgb([28, 28, 30]);
@@ -224,7 +241,7 @@ function tenement(ctx, r) {
   }
 }
 
-function loft(ctx, r) {
+function loft(ctx: Ctx, r: Rng): void {
   brick(ctx, r, 0, 0, TILE, TILE, [168, 134, 104], [150, 140, 128]);
   eachBay((x, y) => {
     const w = B * 0.72;
@@ -237,7 +254,7 @@ function loft(ctx, r) {
   for (let i = 0; i <= BAYS; i++) ctx.fillRect(i * B - 6, 0, 12, TILE);
 }
 
-function setbackBrick(ctx, r) {
+function setbackBrick(ctx: Ctx, r: Rng): void {
   brick(ctx, r, 0, 0, TILE, TILE, [186, 158, 120], [200, 190, 172]);
   eachBay((x, y) => {
     const w = B * 0.5;
@@ -252,9 +269,9 @@ function setbackBrick(ctx, r) {
   }
 }
 
-const AWNINGS = [[[178, 40, 40], [236, 230, 220]], [[30, 92, 60], [220, 214, 196]], [[34, 44, 92], [226, 220, 200]], [[176, 120, 40], [236, 226, 200]], [[110, 30, 40], null], [[40, 70, 50], null]];
+const AWNINGS: [RGB, RGB | null][] = [[[178, 40, 40], [236, 230, 220]], [[30, 92, 60], [220, 214, 196]], [[34, 44, 92], [226, 220, 200]], [[176, 120, 40], [236, 226, 200]], [[110, 30, 40], null], [[40, 70, 50], null]];
 
-function storefronts(ctx, r) {
+function storefronts(ctx: Ctx, r: Rng): void {
   for (let row = 0; row < BAYS; row++) {
     const y = row * B;
     stone(ctx, r, 0, y, TILE, B, r.pick([[120, 100, 84], [176, 168, 150], [70, 66, 62], [150, 74, 56]]), 32);
@@ -297,7 +314,7 @@ function storefronts(ctx, r) {
   }
 }
 
-function lobby(ctx, r) {
+function lobby(ctx: Ctx, r: Rng): void {
   for (let v = 0; v < 2; v++) {
     const y = v * 2 * B;
     stone(ctx, r, 0, y, TILE, 2 * B, v ? [96, 96, 98] : [190, 182, 166], 24);
@@ -323,7 +340,7 @@ function lobby(ctx, r) {
   }
 }
 
-function roof(ctx, r) {
+function roof(ctx: Ctx, r: Rng): void {
   speckle(ctx, r, 0, 0, TILE, TILE, [74, 72, 70], 0.18, 0.05);
   for (let i = 0; i < 14; i++) { // patched tar
     ctx.fillStyle = rgb([60, 58, 56], r.range(0.85, 1.2));
@@ -333,7 +350,7 @@ function roof(ctx, r) {
   for (let i = 0; i <= 8; i++) ctx.fillRect(0, i * 64, TILE, 1);
 }
 
-const PAINTERS = [
+const PAINTERS: ((ctx: Ctx, r: Rng) => void)[] = [
   (c, r) => brickWall(c, r, [150, 66, 48], [178, 166, 150]),
   (c, r) => brickWall(c, r, [196, 168, 122], [210, 200, 182], { pairs: true }),
   (c, r) => brickWall(c, r, [104, 70, 56], [120, 96, 84], { lintel: [136, 98, 80], frame: [70, 50, 40] }),
@@ -349,14 +366,14 @@ const PAINTERS = [
   roof,
 ];
 
-let facadeTexture = null;
+let facadeTexture: THREE.DataArrayTexture | null = null;
 
 /** The facade texture array (built once). */
-export function facadeArray() {
+export function facadeArray(): THREE.DataArrayTexture {
   if (facadeTexture) return facadeTexture;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = TILE;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const data = new Uint8Array(TILE * TILE * 4 * NUM_LAYERS);
   PAINTERS.forEach((paint, i) => {
     ctx.save();
@@ -379,7 +396,7 @@ export function facadeArray() {
 
 /** Lambert material whose colour comes from the facade array, by a
  *  per-vertex `layer` attribute. */
-export function facadeMaterial() {
+export function facadeMaterial(): THREE.MeshLambertMaterial {
   const tex = facadeArray();
   const mat = new THREE.MeshLambertMaterial();
   mat.onBeforeCompile = (shader) => {
@@ -397,8 +414,7 @@ export function facadeMaterial() {
 // ------------------------------------------------------------------ ground
 
 /**
- * The street tile, painted to the layout of the 2006 city_block_base.png
- * (one tile per block): the block, ringed by sidewalk, takes u in [0, BLOCK]
+ * The street tile (one tile per block): the block, ringed by sidewalk, takes u in [0, BLOCK]
  * and v in [1 - BLOCK, 1]; the streets run along the +u and -v edges.
  * 1930s New York: asphalt with Belgian-block patches and manholes, granite
  * curbs, concrete flags, crosswalks as a pair of white lines, streetcar
@@ -407,11 +423,11 @@ export function facadeMaterial() {
 export const GROUND_BLOCK = 412 / 512;
 const SIDEWALK = 20 / 512;
 
-export function groundTexture() {
+export function groundTexture(): THREE.CanvasTexture {
   const S = 1024;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = S;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d')!;
   const r = rng(1929);
   const blk = GROUND_BLOCK * S;
   const sw = SIDEWALK * S;
@@ -475,6 +491,6 @@ export function groundTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 4;
-  t.flipY = false; // texcoord v=0 is the top of the image, as SDL uploaded it
+  t.flipY = false; // texcoord v=0 is the top of the image, like every other texture
   return t;
 }

@@ -1,43 +1,49 @@
-// Port of game/gamemanager.cpp and game/gamefilereader.cpp.
+// Plays the components of a .game file in sequence.
 //
 // A .game file lists components, one per line:
 //   blank <rrggbb> | picture <file> [msecs] [rrggbb] | storyteller <file.shot>
 //   mission <file.xml> | music <file> | transition <type> <msecs>
 // A transition links the component before it to the one after it.
 
-import { readLines } from '../core/assets.js';
-import { MenuFilter } from '../core/input.js';
-import { hexcolor } from '../core/settings.js';
-import { GameComponent, Status } from './component.js';
-import { Blank, Picture, SoundTrack } from './simple.js';
-import { StoryTeller } from './storyteller.js';
-import { makeTransition } from './transition.js';
-import { Mission } from '../mission/mission.js';
+import { readLines } from '../core/assets.ts';
+import type { Display } from '../core/display.ts';
+import { MenuFilter, type Input } from '../core/input.ts';
+import { hexcolor } from '../core/settings.ts';
+import { GameComponent, Status } from './component.ts';
+import { Blank, Picture, SoundTrack } from './simple.ts';
+import { StoryTeller } from './storyteller.ts';
+import { makeTransition, Transition } from './transition.ts';
+import { Mission } from '../mission/mission.ts';
 
 // Components worth loading ahead of time (missions generate a whole city,
-// so they load when reached, behind the load bar, as in 2006).
+// so they load when reached, behind the load bar).
 const PREFETCH_AHEAD = 4;
 
+/** What the manager needs of the tuner: shown while the tuner key is toggled on. */
+export interface TunerView {
+  setVisible(visible: boolean): void;
+}
+
 export class GameManager extends GameComponent {
-  constructor(tuner) {
+  override status: Status = Status.PLAYING;
+  components: GameComponent[] = [];
+  private transition: Transition | null = null;
+  private lastComponent: GameComponent | null = null;
+  current = 0;
+  private menu = new MenuFilter();
+
+  constructor(private tuner: TunerView | null = null) {
     super();
-    this.status = Status.PLAYING;
-    this.components = [];
-    this.transition = null;
-    this.lastComponent = null;
-    this.current = 0;
-    this.menu = new MenuFilter();
-    this.tuner = tuner;
   }
 
-  static async fromFile(filename, tuner) {
+  static async fromFile(filename: string, tuner: TunerView | null = null): Promise<GameManager> {
     const gm = new GameManager(tuner);
     console.log(`GameManager: ${filename}`);
     for (const line of await readLines(filename)) {
       try {
         gm.handleLine(line);
       } catch (e) {
-        console.warn(`GameFileReader: ${e.message}`);
+        console.warn(`GameFileReader: ${e instanceof Error ? e.message : e}`);
       }
     }
     if (gm.transition) console.log('Warning: transition at the end of the file is ignored');
@@ -45,7 +51,7 @@ export class GameManager extends GameComponent {
     return gm;
   }
 
-  handleLine(line) {
+  handleLine(line: string): void {
     const words = line.split(' ');
     const err = `GameFileReader(${line}): `;
     if (words.length < 2) throw new Error(`${err} line too short`);
@@ -57,39 +63,43 @@ export class GameManager extends GameComponent {
       this.setTransition(t);
       return;
     }
-    let gc;
+    let gc: GameComponent;
     if (component === 'storyteller') {
-      gc = new StoryTeller();
-      gc.setFilename(words[1]);
+      const st = new StoryTeller();
+      st.setFilename(words[1]);
+      gc = st;
     } else if (component === 'mission') {
       gc = new Mission(words[1]);
     } else if (component === 'blank') {
-      gc = new Blank();
+      const b = new Blank();
       const col = hexcolor(words[1]);
-      if (col) gc.setColor(col[0], col[1], col[2]);
+      if (col) b.setColor(col[0], col[1], col[2]);
+      gc = b;
     } else if (component === 'picture') {
-      gc = new Picture();
-      gc.setFilename(words[1]);
-      if (words.length >= 3) gc.setTime(parseInt(words[2], 10) || 0);
+      const p = new Picture();
+      p.setFilename(words[1]);
+      if (words.length >= 3) p.setTime(parseInt(words[2], 10) || 0);
       if (words.length >= 4) {
         const col = hexcolor(words[3]);
-        if (col) gc.setColor(col[0], col[1], col[2]);
+        if (col) p.setColor(col[0], col[1], col[2]);
       }
+      gc = p;
     } else if (component === 'music') {
-      gc = new SoundTrack();
-      gc.setFilename(words[1]);
+      const m = new SoundTrack();
+      m.setFilename(words[1]);
+      gc = m;
     } else {
       throw new Error(`${err} invalid line`);
     }
     this.addComponent(gc);
   }
 
-  setTransition(t) {
+  private setTransition(t: Transition): void {
     if (this.transition) console.log('Warning: 2 sequential transitions');
     this.transition = t;
   }
 
-  addComponent(gc) {
+  addComponent(gc: GameComponent): void {
     if (this.transition) {
       this.transition.setPrev(this.lastComponent);
       this.transition.setNext(gc);
@@ -100,18 +110,18 @@ export class GameManager extends GameComponent {
     this.lastComponent = gc;
   }
 
-  currentComponent() { return this.components[this.current]; }
+  currentComponent(): GameComponent { return this.components[this.current]; }
 
-  prefetch() {
+  private prefetch(): void {
     for (let i = this.current; i < Math.min(this.components.length, this.current + PREFETCH_AHEAD); i++) {
       const c = this.components[i];
       if (c instanceof Mission) break;
-      if (c.next instanceof Mission) continue;
+      if (c instanceof Transition && c.next instanceof Mission) continue;
       c.load();
     }
   }
 
-  play(display, msecs, input) {
+  override play(display: Display, msecs: number, input: Input): void {
     if (this.status !== Status.PLAYING) return;
     this.prefetch();
     const current = this.currentComponent();
@@ -123,7 +133,7 @@ export class GameManager extends GameComponent {
     else current.play(display, msecs, input);
 
     const s = current.getStatus();
-    // (Esc no longer quits here: main.js turns it into the pause menu.)
+    // (Esc doesn't quit here: main.ts turns it into the pause menu.)
     if (s === Status.QUIT) {
       this.status = Status.QUIT;
     } else if (this.menu.skip() || (current.loaded && s === Status.NEXT)) {
@@ -134,7 +144,7 @@ export class GameManager extends GameComponent {
     }
   }
 
-  advance() {
+  advance(): void {
     const old = this.current;
     if (++this.current >= this.components.length) {
       this.status = Status.QUIT;
@@ -146,12 +156,12 @@ export class GameManager extends GameComponent {
   }
 
   /** True if a mission comes later in the sequence. */
-  hasMissionAhead() {
+  hasMissionAhead(): boolean {
     return this.components.some((c, i) => i > this.current && c instanceof Mission);
   }
 
   /** Jump straight to the next mission, skipping the story before it. */
-  skipToMission() {
+  skipToMission(): boolean {
     const target = this.components.findIndex((c, i) => i > this.current && c instanceof Mission);
     if (target < 0) return false;
     for (let i = 0; i < target; i++) this.components[i].dispose();
@@ -159,12 +169,12 @@ export class GameManager extends GameComponent {
     return true;
   }
 
-  release(c) {
+  private release(c: GameComponent): void {
     c.dispose();
-    if (c.prev) c.prev.dispose();
+    if (c instanceof Transition) c.prev?.dispose();
   }
 
-  dispose() {
+  override dispose(): void {
     for (const c of this.components) c.dispose();
   }
 }

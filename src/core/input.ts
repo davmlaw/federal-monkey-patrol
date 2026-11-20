@@ -1,45 +1,59 @@
-// Port of input/: InputManager + Keyboard/Joystick devices filling an Input
-// struct (axis + buttons), and the InputFilter/MenuFilter that read it.
+// InputManager + keyboard/gamepad devices filling an Input struct (axis +
+// buttons + throttle), and the InputFilter/MenuFilter that read it.
 
 // NEXT: a tap or click on the game screen (moves story dialogue on).
 // QUIT (Esc) now opens the pause menu rather than quitting straight away.
-export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4, NEXT: 5 };
+export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4, NEXT: 5 } as const;
+export type Button = (typeof Button)[keyof typeof Button];
 const NUM_BUTTONS = 6;
 
-// Throttle starts where the commented-out 2006 code had the plane's speed
-// (`velocity.z = -600`, out of the default max_speed of 1000).
+// Starting throttle: 600 of the default max_speed of 1000.
 export const DEFAULT_THROTTLE = 0.6;
 // Keyboard/gamepad throttle change, per second held.
 const THROTTLE_RATE = 0.5;
 
+export interface Axis { x: number; y: number }
+
+/** Something that contributes to the Input each frame (keyboard, gamepad, touch). */
+export interface InputDevice {
+  update(msecs: number): void;
+  getAxis(): Axis;
+  dispose(): void;
+}
+
 export class Input {
+  state: boolean[] = [];
+  toggle: boolean[] = [];
+  axis: Axis = { x: 0, y: 0 };
+  throttle = DEFAULT_THROTTLE;
+
   constructor() { this.clear(); }
 
-  clear() {
+  clear(): void {
     this.state = new Array(NUM_BUTTONS).fill(false);
     this.toggle = new Array(NUM_BUTTONS).fill(false);
     this.axis = { x: 0, y: 0 };
     this.throttle = DEFAULT_THROTTLE; // 0..1, persistent like a real lever
   }
 
-  setThrottle(t) { this.throttle = Math.min(1, Math.max(0, t)); }
+  setThrottle(t: number): void { this.throttle = Math.min(1, Math.max(0, t)); }
 
-  buttonPressed(b) { return b >= 0 && b < NUM_BUTTONS ? this.state[b] : false; }
+  buttonPressed(b: Button): boolean { return b >= 0 && b < NUM_BUTTONS ? this.state[b] : false; }
 
-  buttonToggled(b) { return b >= 0 && b < NUM_BUTTONS ? this.toggle[b] : false; }
+  buttonToggled(b: Button): boolean { return b >= 0 && b < NUM_BUTTONS ? this.toggle[b] : false; }
 
-  getAxis() { return { x: this.axis.x, y: this.axis.y }; }
+  getAxis(): Axis { return { x: this.axis.x, y: this.axis.y }; }
 
-  setButton(b, down) {
+  setButton(b: Button, down: boolean): void {
     if (b < 0 || b >= NUM_BUTTONS) return;
     this.state[b] = down;
     if (down) this.toggle[b] = !this.toggle[b];
   }
 }
 
-// Keyboard map from input/keyboard.cpp. Backquote is an extra tuner key,
+// Backquote is an extra tuner key,
 // since many laptop keyboards have no Insert key.
-const KEYS = {
+const KEYS: Partial<Record<string, Button>> = {
   Space: Button.FIRE1,
   Enter: Button.FIRE1,
   NumpadEnter: Button.FIRE1,
@@ -52,17 +66,16 @@ const KEYS = {
   Tab: Button.MODE,
 };
 
-class Keyboard {
-  constructor(input) {
-    this.axis = { x: 0, y: 0 };
-    this.throttleDir = { up: 0, down: 0 };
-    this.input = input;
-    this.onKey = this.onKey.bind(this);
+class Keyboard implements InputDevice {
+  private axis: Axis = { x: 0, y: 0 };
+  private throttleDir = { up: 0, down: 0 };
+
+  constructor(private input: Input) {
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('keyup', this.onKey);
   }
 
-  onKey(e) {
+  private onKey = (e: KeyboardEvent): void => {
     if (e.target instanceof HTMLElement && e.target.closest('.lil-gui')) return;
     const pressed = e.type === 'keydown';
     const b = KEYS[e.code];
@@ -82,91 +95,92 @@ class Keyboard {
       default: return;
     }
     e.preventDefault();
-  }
+  };
 
-  getAxis() { return this.axis; }
+  getAxis(): Axis { return this.axis; }
 
-  update(msecs) {
+  update(msecs: number): void {
     const d = this.throttleDir.up - this.throttleDir.down;
     if (d) this.input.setThrottle(this.input.throttle + d * THROTTLE_RATE * msecs / 1000);
   }
 
-  dispose() {
+  dispose(): void {
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('keyup', this.onKey);
   }
 }
 
-// input/joystick.cpp: axis 0/1 with a dead zone, buttons 0/1/8. Added:
-// button 3 switches flying mode, triggers (6/7) move the throttle.
+// Gamepad: axis 0/1 with a dead zone, buttons 0/1 fire, 3 switches flying
+// mode, 8 the tuner; the triggers (6/7) move the throttle.
 const TOLERANCE = 0.1;
-const PAD_BUTTONS = { 0: Button.FIRE1, 1: Button.FIRE2, 3: Button.MODE, 8: Button.TUNER };
+const PAD_BUTTONS: Record<number, Button> = { 0: Button.FIRE1, 1: Button.FIRE2, 3: Button.MODE, 8: Button.TUNER };
 
-class Joystick {
-  constructor(input) {
-    this.input = input;
-    this.axis = { x: 0, y: 0 };
-    this.buttons = {};
-  }
+class Joystick implements InputDevice {
+  private axis: Axis = { x: 0, y: 0 };
+  private buttons: Record<number, boolean> = {};
 
-  update(msecs) {
+  constructor(private input: Input) {}
+
+  update(msecs: number): void {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const pad = pads && [...pads].find((p) => p);
+    const pad = [...pads].find((p) => p);
     if (!pad) { this.axis = { x: 0, y: 0 }; return; }
-    const dz = (v) => (v > -TOLERANCE && v < TOLERANCE ? 0 : v);
+    const dz = (v: number): number => (v > -TOLERANCE && v < TOLERANCE ? 0 : v);
     this.axis = { x: dz(pad.axes[0] || 0), y: -dz(pad.axes[1] || 0) };
     for (const [i, b] of Object.entries(PAD_BUTTONS)) {
-      const down = !!(pad.buttons[i] && pad.buttons[i].pressed);
-      if (down !== !!this.buttons[i]) {
-        this.buttons[i] = down;
+      const n = Number(i);
+      const down = !!(pad.buttons[n] && pad.buttons[n].pressed);
+      if (down !== !!this.buttons[n]) {
+        this.buttons[n] = down;
         this.input.setButton(b, down);
       }
     }
-    const trig = (i) => (pad.buttons[i] ? pad.buttons[i].value || (pad.buttons[i].pressed ? 1 : 0) : 0);
+    const trig = (i: number): number => (pad.buttons[i] ? pad.buttons[i].value || (pad.buttons[i].pressed ? 1 : 0) : 0);
     const d = trig(7) - trig(6);
     if (Math.abs(d) > TOLERANCE) this.input.setThrottle(this.input.throttle + d * THROTTLE_RATE * msecs / 1000);
   }
 
-  getAxis() { return this.axis; }
+  getAxis(): Axis { return this.axis; }
 
-  dispose() {}
+  dispose(): void {}
 }
 
 /** Taps and clicks on the game canvas, as Button.NEXT. */
-export class PointerTap {
-  constructor(input, el) {
-    this.input = input;
-    this.el = el;
-    this.pending = false;
-    this.onDown = (e) => {
-      if (e.button > 0) return;
-      this.input.setButton(Button.NEXT, true);
-      this.pending = true;
-    };
+export class PointerTap implements InputDevice {
+  private pending = false;
+
+  constructor(private input: Input, private el: HTMLElement) {
     el.addEventListener('pointerdown', this.onDown);
   }
 
-  getAxis() { return { x: 0, y: 0 }; }
+  private onDown = (e: PointerEvent): void => {
+    if (e.button > 0) return;
+    this.input.setButton(Button.NEXT, true);
+    this.pending = true;
+  };
 
-  update() {
+  getAxis(): Axis { return { x: 0, y: 0 }; }
+
+  update(): void {
     // a tap is a press for one frame
     if (this.pending) this.pending = false;
     else if (this.input.buttonPressed(Button.NEXT)) this.input.setButton(Button.NEXT, false);
   }
 
-  dispose() { this.el.removeEventListener('pointerdown', this.onDown); }
+  dispose(): void { this.el.removeEventListener('pointerdown', this.onDown); }
 }
 
 export class InputManager {
-  constructor(input) {
-    this.input = input;
+  private devices: InputDevice[];
+
+  constructor(private input: Input) {
     this.devices = [new Keyboard(input), new Joystick(input)];
   }
 
   /** Add another device, e.g. the on-screen touch controls. */
-  addDevice(d) { this.devices.push(d); }
+  addDevice(d: InputDevice): void { this.devices.push(d); }
 
-  update(msecs = 0) {
+  update(msecs = 0): void {
     for (const d of this.devices) d.update(msecs);
     this.input.axis = { x: 0, y: 0 };
     for (const d of this.devices) {
@@ -176,41 +190,35 @@ export class InputManager {
     }
   }
 
-  dispose() { for (const d of this.devices) d.dispose(); }
+  dispose(): void { for (const d of this.devices) d.dispose(); }
 }
 
-/** input/inputfilter.h */
+/** Reads the requests common to every component (tuner, quit) from the Input. */
 export class InputFilter {
-  constructor() {
-    this.requestTuner = false;
-    this.requestQuit = false;
-  }
+  requestTuner = false;
+  requestQuit = false;
 
-  read(input) {
+  read(input: Input): void {
     this.requestTuner = input.buttonToggled(Button.TUNER);
     this.requestQuit = input.buttonPressed(Button.QUIT);
     this._read(input);
   }
 
-  _read() {}
+  protected _read(_input: Input): void {}
 
-  tuner() { return this.requestTuner; }
+  tuner(): boolean { return this.requestTuner; }
 
-  quit() { return this.requestQuit; }
+  quit(): boolean { return this.requestQuit; }
 }
 
-/** input/menufilter.cpp. The skip request was commented out in 2006. */
+/** Input for menus and non-interactive components. Skipping is off for now. */
 export class MenuFilter extends InputFilter {
-  constructor() {
-    super();
-    this.requestSkip = false;
-    this.okPressed = false;
-  }
+  requestSkip = false;
+  okPressed = false;
 
-  _read(input) {
-    // this.requestSkip = input.buttonPressed(Button.FIRE1);
+  protected override _read(input: Input): void {
     this.okPressed = input.buttonPressed(Button.FIRE1);
   }
 
-  skip() { return this.requestSkip; }
+  skip(): boolean { return this.requestSkip; }
 }

@@ -8,7 +8,7 @@ A 3D game from 2004–2006. Giant apes are attacking the city. Harlow, a disgrac
 
 Design notes are in [game.txt](game.txt), and the author's TODO list is in [todo.html](todo.html).
 
-It was written in C++ with OpenGL and SDL 1.2, and has been ported to the browser with [Three.js](https://threejs.org/). The first commit in the history is the 2002–2003 prototype, which used GLUT and ODE.
+It was written in C++ with OpenGL and SDL 1.2, and has been ported to the browser in TypeScript with [Three.js](https://threejs.org/). The first commit in the history is the 2002–2003 prototype, which used GLUT and ODE.
 
 ## What's in it
 

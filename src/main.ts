@@ -1,40 +1,41 @@
-// Port of main.cpp: create the display, a GameManager for a .game file, the
-// input manager, then loop: read input, play the game, until it quits.
+// Entry point: the menu, then the display, a GameManager for a .game file
+// and the input manager, and the loop: read input, play the game, until it
+// quits.
 //
 // Pick the .game file with ?game=<path> (e.g. ?game=fly.game); the default
 // is main.properties' default_game, data/federal_monkey_patrol.game.
 
 import './style.css';
-import { display } from './core/display.js';
-import { setAudioPaused, unlockAudio } from './core/assets.js';
-import { loadFont } from './core/draw2d.js';
-import { Button, Input, InputManager, PointerTap } from './core/input.js';
-import { settings } from './core/settings.js';
-import { Status } from './game/component.js';
-import { GameManager } from './game/manager.js';
-import { stopMusic } from './game/simple.js';
-import { gamestats } from './mission/stats.js';
-import { Tuner } from './tuner.js';
-import { TouchControls } from './core/touch.js';
-import { Mission } from './mission/mission.js';
-import { StoryTeller } from './game/storyteller.js';
-import { stage } from './game/stage.js';
+import { display } from './core/display.ts';
+import { setAudioPaused, unlockAudio } from './core/assets.ts';
+import { loadFont } from './core/draw2d.ts';
+import { Button, Input, InputManager, PointerTap } from './core/input.ts';
+import { settings } from './core/settings.ts';
+import { Status } from './game/component.ts';
+import { GameManager } from './game/manager.ts';
+import { stopMusic } from './game/simple.ts';
+import { gamestats } from './mission/stats.ts';
+import { Tuner } from './tuner.ts';
+import { TouchControls } from './core/touch.ts';
+import { Mission } from './mission/mission.ts';
+import { StoryTeller } from './game/storyteller.ts';
+import { stage } from './game/stage.ts';
 
 const GAMES = [
-  { file: 'data/federal_monkey_patrol.game', title: 'Federal Monkey Patrol', note: 'The story: film leader, intro and the four chapters (missions were commented out in 2006)' },
+  { file: 'data/federal_monkey_patrol.game', title: 'Federal Monkey Patrol', note: 'The story: film leader, intro and the four chapters (it has no missions yet)' },
   { file: 'fly.game', title: 'Fly', note: 'Straight into a mission: claw.xml' },
   { file: 'mission.game', title: 'Mission', note: 'test.xml, with its countdown timer' },
   { file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
 ];
 
 const params = new URLSearchParams(window.location.search);
-const overlay = document.getElementById('overlay');
-const canvas = document.getElementById('screen');
+const overlay = document.getElementById('overlay') as HTMLDivElement;
+const canvas = document.getElementById('screen') as HTMLCanvasElement;
 
-let game = null;
-let tuner = null;
-let inputmanager = null;
-let touch = null;
+let game: GameManager | null = null;
+let tuner: Tuner | null = null;
+let inputmanager: InputManager | null = null;
+let touch: TouchControls | null = null;
 let running = false;
 let paused = false;
 
@@ -49,21 +50,21 @@ hud.innerHTML = `
   <button class="hud-pause" type="button" aria-label="Pause" title="Pause (Esc)">&#10074;&#10074;</button>
   <a class="hud-skip" href="#" hidden>Skip to game &rsaquo;</a>`;
 document.body.append(hud);
-const pauseBtn = hud.querySelector('.hud-pause');
-const skipLink = hud.querySelector('.hud-skip');
+const pauseBtn = hud.querySelector('.hud-pause') as HTMLButtonElement;
+const skipLink = hud.querySelector('.hud-skip') as HTMLAnchorElement;
 pauseBtn.addEventListener('click', () => setPaused(true));
 skipLink.addEventListener('click', (e) => {
   e.preventDefault();
   skipToGame();
 });
 
-function gameUrl(file) {
+function gameUrl(file: string): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
   return u.pathname + u.search;
 }
 
-function setPaused(p) {
+function setPaused(p: boolean): void {
   if (!running || p === paused) return;
   paused = p;
   setAudioPaused(p);
@@ -77,21 +78,22 @@ function setPaused(p) {
         </div>
       </div>`;
     overlay.hidden = false;
-    overlay.querySelector('.resume').addEventListener('click', () => setPaused(false));
-    overlay.querySelector('.menu').addEventListener('click', () => {
+    const resume = overlay.querySelector('.resume') as HTMLButtonElement;
+    resume.addEventListener('click', () => setPaused(false));
+    overlay.querySelector('.menu')?.addEventListener('click', () => {
       stop();
       showMenu();
     });
-    overlay.querySelector('.resume').focus();
+    resume.focus();
   } else {
     overlay.hidden = true;
     canvas.focus();
   }
 }
 
-/** Skip the story: on to the next mission, or if the story has none (the
- *  2006 story had its missions commented out), straight to flying. */
-function skipToGame() {
+/** Skip the story: on to the next mission, or if the story has none,
+ *  straight to flying. */
+function skipToGame(): void {
   if (!game) return;
   if (game.skipToMission()) {
     canvas.focus();
@@ -103,14 +105,14 @@ function skipToGame() {
 }
 
 /** "Last updated <build time>" (in the viewer's time zone), and the commit. */
-function lastUpdated() {
+function lastUpdated(): string {
   const when = new Date(__BUILD_TIME__).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const c = __BUILD_COMMIT__;
   const link = c ? ` (<a href="https://github.com/davmlaw/federal-monkey-patrol/commit/${c}">${c}</a>)` : '';
   return `Last updated ${when}${link}`;
 }
 
-function showMenu({ ended = false } = {}) {
+function showMenu({ ended = false } = {}): void {
   const chosen = params.get('game');
   overlay.innerHTML = `
     <div class="panel">
@@ -131,17 +133,17 @@ function showMenu({ ended = false } = {}) {
         &middot; ${lastUpdated()}</p>
     </div>`;
   overlay.hidden = false;
-  overlay.querySelectorAll('a[data-game]').forEach((a) => {
+  overlay.querySelectorAll<HTMLAnchorElement>('a[data-game]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       window.history.replaceState(null, '', a.getAttribute('href'));
-      start(a.dataset.game);
+      start(a.dataset.game ?? null);
     });
   });
-  overlay.querySelector('a.chosen, a[data-game]')?.focus();
+  overlay.querySelector<HTMLAnchorElement>('a.chosen, a[data-game]')?.focus();
 }
 
-async function start(file) {
+async function start(file: string | null): Promise<void> {
   unlockAudio();
   overlay.hidden = true;
   canvas.focus();
@@ -153,28 +155,31 @@ async function start(file) {
     game = await GameManager.fromFile(file || settings.gets('main', 'default_game'), tuner);
   } catch (e) {
     console.error(e);
-    overlay.innerHTML = `<div class="panel"><h1>Uncaught Exception</h1><pre>${String(e.message || e)}</pre></div>`;
+    overlay.innerHTML = `<div class="panel"><h1>Uncaught Exception</h1><pre>${String(e instanceof Error ? e.message : e)}</pre></div>`;
     overlay.hidden = false;
     return;
   }
+  const g = game;
   const input = new Input();
-  inputmanager = new InputManager(input);
-  touch = new TouchControls(input);
-  inputmanager.addDevice(touch);
-  inputmanager.addDevice(new PointerTap(input, canvas));
-  const hasStory = game.components.some((c) => c instanceof StoryTeller);
-  let lastEsc = null;
+  const im = new InputManager(input);
+  const tc = new TouchControls(input);
+  inputmanager = im;
+  touch = tc;
+  im.addDevice(tc);
+  im.addDevice(new PointerTap(input, canvas));
+  const hasStory = g.components.some((c) => c instanceof StoryTeller);
+  let lastEsc: boolean | null = null;
   running = true;
   paused = false;
   hud.hidden = false;
   console.log('---------- BEGIN MAIN LOOP ----------');
   let last = performance.now();
-  const frame = (now) => {
+  const frame = (now: number): void => {
     if (!running) return;
-    // Timer::tick(), capped so a backgrounded tab doesn't skip whole scenes
+    // capped so a backgrounded tab doesn't skip whole scenes
     const msecs = Math.min(250, Math.max(0, Math.round(now - last)));
     last = now;
-    inputmanager.update(msecs);
+    im.update(msecs);
     // Esc (or the pause button) pauses; Esc again resumes
     const esc = input.buttonToggled(Button.QUIT);
     if (lastEsc !== null && esc !== lastEsc) setPaused(!paused);
@@ -182,21 +187,21 @@ async function start(file) {
     display.beginFrame();
     stage.beginFrame();
     try {
-      const c = game.currentComponent();
+      const c = g.currentComponent();
       if (paused) c?.play(display, 0, null); // frozen
-      else game.play(display, msecs, input);
+      else g.play(display, msecs, input);
       // on-screen flight controls only while flying a mission
-      const flying = c instanceof Mission && c.loaded && !c.loadError && !!c.player;
-      touch.setVisible(flying && !paused && !tuner?.visible);
-      if (flying) touch.setMode(c.player.modeName());
+      const player = c instanceof Mission && c.loaded && !c.loadError ? c.player : null;
+      tc.setVisible(!!player && !paused && !tuner?.visible);
+      if (player) tc.setMode(player.modeName());
       stage.endFrame();
       pauseBtn.hidden = paused;
       skipLink.hidden = paused || !hasStory || c instanceof Mission;
     } catch (e) {
       console.error('Uncaught Exception.', e);
-      game.status = Status.QUIT;
+      g.status = Status.QUIT;
     }
-    if (game.getStatus() === Status.QUIT) {
+    if (g.getStatus() === Status.QUIT) {
       console.log(`===== Game Statistics =====\n${gamestats}`);
       stop();
       showMenu({ ended: true });
@@ -207,7 +212,7 @@ async function start(file) {
   requestAnimationFrame(frame);
 }
 
-function stop() {
+function stop(): void {
   running = false;
   if (paused) setAudioPaused(false);
   paused = false;

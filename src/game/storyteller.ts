@@ -1,36 +1,39 @@
-// Port of game/storyteller/: cutscenes from .shot files. A picture fills the
+// Cutscenes from .shot files. A picture fills the
 // top two thirds; dialogue lines (with speaker portraits) play underneath.
 //
-// A scene is an HTML layer on the stage (stage.js), so the text is real text
-// and transitions clip or fade the whole scene with CSS. Changed from 2006,
-// where one line at a time was shown for msec_initial + words *
-// msec_per_word in the bitmap font: consecutive lines stack in the box while
-// they fit (earlier ones dimmed) so a conversation reads as one, speakers
-// are named, the timing defaults are slower (story.properties), and a tap,
-// click, Space or Enter moves on to the next line.
+// A scene is an HTML layer on the stage (stage.ts), so the text is real text
+// and transitions clip or fade the whole scene with CSS. Each line shows for
+// msec_initial + words * msec_per_word (story.properties), or until its
+// sound ends; consecutive lines stack in the box while they fit (earlier
+// ones dimmed) so a conversation reads as one, speakers are named, and a
+// tap, click, Space or Enter moves on to the next line.
 
-import { loadSound, playSound, readLines } from '../core/assets.js';
-import { Button } from '../core/input.js';
-import { dircheck, settings } from '../core/settings.js';
-import { GameComponent, Status } from './component.js';
-import { makeLayer, stage } from './stage.js';
+import { loadSound, playSound, readLines, type SoundHandle } from '../core/assets.ts';
+import type { Display } from '../core/display.ts';
+import { Button, type Input } from '../core/input.ts';
+import { dircheck, settings } from '../core/settings.ts';
+import { GameComponent, Status } from './component.ts';
+import { makeLayer, stage } from './stage.ts';
 
-function escapeHtml(s) {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
 }
 
 class Dialogue {
-  constructor(speaker, portrait, text, timeTotal, sound) {
-    this.speaker = speaker;
-    this.portrait = portrait; // image URL or null (narrator)
-    this.text = text;
-    this.timeTotal = timeTotal;
-    this.sound = sound; // decoded buffer, or null
-    this.timeDisplayed = 0;
-    this.handle = null;
-  }
+  private timeDisplayed = 0;
+  private handle: SoundHandle | null = null;
 
-  node() {
+  constructor(
+    readonly speaker: string,
+    readonly portrait: string | null, // image URL, or null (narrator)
+    readonly text: string,
+    readonly timeTotal: number,
+    readonly sound: AudioBuffer | null,
+  ) {}
+
+  node(): HTMLDivElement {
     const el = document.createElement('div');
     el.className = this.portrait ? 'line' : 'line narrator';
     el.innerHTML = (this.portrait ? `<img src="${escapeHtml(this.portrait)}" alt="">` : '')
@@ -39,14 +42,14 @@ class Dialogue {
     return el;
   }
 
-  speak(msecs) {
+  speak(msecs: number): void {
     if (this.sound && !this.handle && !this.done()) this.handle = playSound(this.sound);
     this.timeDisplayed += msecs;
   }
 
-  stop() { this.handle?.stop(); }
+  stop(): void { this.handle?.stop(); }
 
-  done() {
+  done(): boolean {
     let done = this.timeDisplayed >= this.timeTotal;
     if (this.sound) done = done && !!this.handle && this.handle.done;
     return done;
@@ -54,22 +57,28 @@ class Dialogue {
 }
 
 export class StoryTeller extends GameComponent {
-  constructor() {
-    super();
-    this.isDom = true;
-    this.status = Status.PLAYING;
-    this.dialogues = [];
-    this.current = 0;
-    this.started = false;
-    this.lastTaps = null;
-  }
+  override isDom = true;
+  override status: Status = Status.PLAYING;
+  private filename = '';
+  private dialogues: Dialogue[] = [];
+  private current = 0;
+  private started = false;
+  private lastTaps: [boolean, boolean] | null = null;
+  /** Speaker name -> portrait file (relative to dir). */
+  private portrait: Record<string, string> = {};
+  private msecInitial = 0;
+  private msecPerWord = 0;
+  private dir = '';
+  private imagePath = '';
+  private layer: HTMLDivElement = makeLayer('story');
+  private box: HTMLElement = this.layer;
 
-  setFilename(f) { this.filename = f; }
+  setFilename(f: string): void { this.filename = f; }
 
-  getName() { return `StoryTeller(${this.filename})`; }
+  override getName(): string { return `StoryTeller(${this.filename})`; }
 
-  async _load() {
-    const prop = (k) => settings.gets('story', k);
+  protected override async _load(): Promise<void> {
+    const prop = (k: string): string => settings.gets('story', k);
     // Default portraits (can be overridden in story files)
     this.portrait = {
       Harlow: prop('harlow_pic'),
@@ -81,14 +90,14 @@ export class StoryTeller extends GameComponent {
     this.msecPerWord = parseInt(prop('msec_per_word'), 10);
     this.dir = dircheck(prop('dir'));
 
-    let lines = [];
+    let lines: string[] = [];
     try {
       lines = await readLines(this.dir + this.filename);
     } catch (e) {
-      console.warn(e.message);
+      console.warn(e instanceof Error ? e.message : e);
     }
     // Lines are handled in order; pictures/portraits affect what follows.
-    const pending = [];
+    const pending: Promise<Dialogue | null>[] = [];
     for (const line of lines) {
       const words = line.split(' ');
       if (words.length < 2) continue;
@@ -101,20 +110,20 @@ export class StoryTeller extends GameComponent {
       }
     }
     this.layer = makeLayer('story', '<div class="pic"></div><div class="dialogue"></div>');
-    this.box = this.layer.querySelector('.dialogue');
+    this.box = this.layer.querySelector<HTMLElement>('.dialogue')!;
     if (this.imagePath) {
       const img = new Image();
       img.src = this.imagePath;
       img.alt = '';
       await img.decode().catch(() => console.warn(`Could not load picture "${this.imagePath}"`));
-      this.layer.querySelector('.pic').append(img);
+      this.layer.querySelector('.pic')!.append(img);
     }
-    this.dialogues = (await Promise.all(pending)).filter(Boolean);
+    this.dialogues = (await Promise.all(pending)).filter((d): d is Dialogue => !!d);
     this.current = 0;
     if (!this.dialogues.length) this.status = Status.NEXT; // no point displaying
   }
 
-  async addDialogue(wordlist) {
+  private async addDialogue(wordlist: string[]): Promise<Dialogue | null> {
     const first = wordlist[0];
     if (!(first.length > 1 && first.endsWith(':'))) return null;
     const speaker = first.slice(0, -1);
@@ -122,7 +131,7 @@ export class StoryTeller extends GameComponent {
     const portrait = Object.hasOwn(this.portrait, speaker) ? this.dir + this.portrait[speaker] : null;
     // SOUND= and TIME= tokens (first of each) are removed from the text.
     const words = wordlist.slice(1);
-    let sound = null;
+    let sound: AudioBuffer | null = null;
     let timeFixed = 0;
     const s = words.findIndex((x) => x.includes('SOUND='));
     if (s >= 0) {
@@ -141,16 +150,16 @@ export class StoryTeller extends GameComponent {
   }
 
   /** A new press of Space/Enter or a tap/click since the last frame. */
-  tapped(input) {
+  private tapped(input: Input | null): boolean {
     if (!input) return false;
-    const taps = [input.buttonToggled(Button.FIRE1), input.buttonToggled(Button.NEXT)];
+    const taps: [boolean, boolean] = [input.buttonToggled(Button.FIRE1), input.buttonToggled(Button.NEXT)];
     const last = this.lastTaps;
     this.lastTaps = taps;
     return !!last && (taps[0] !== last[0] || taps[1] !== last[1]);
   }
 
   /** Show line i in the box, stacked under the earlier ones if it fits. */
-  show(i) {
+  private show(i: number): void {
     const node = this.dialogues[i].node();
     for (const n of this.box.children) n.classList.add('earlier');
     this.box.append(node);
@@ -159,7 +168,7 @@ export class StoryTeller extends GameComponent {
     }
   }
 
-  _play(display, msecs, input, alpha) {
+  protected override _play(_display: Display, msecs: number, input: Input | null, alpha: number): void {
     stage.show(this.layer, alpha); // on the stage first, so the box can be measured
     const d = this.dialogues[this.current];
     if (!d) return;

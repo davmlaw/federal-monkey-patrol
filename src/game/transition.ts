@@ -1,46 +1,43 @@
-// Port of game/transition/: fade, spin, star wipe and angled wipes between the
-// previous and next components. Both are played with msecs=0 (frozen) while
-// the transition runs.
+// Fade, spin, star wipe and angled wipes between the previous and next
+// components. Both are played with msecs=0 (frozen) while the transition
+// runs.
 //
-// The C++ masked the next component using the depth buffer. Pictures and
-// story scenes are now HTML layers (stage.js), so when either side is one
+// Pictures and story scenes are HTML layers (stage.ts), so when either side is one
 // the mask is CSS: a clip-path on the next layer, or, when the next is a
 // WebGL mission under an HTML layer, a mask with a hole on the previous
 // one. Between two WebGL components the next is rendered into an offscreen
 // target and the mask shape is drawn with that render as its texture.
 
-import { ORTHO_H, ORTHO_W } from '../core/display.js';
-import { GameComponent, Status } from './component.js';
-import { clipInside, makeLayer, maskOutside, outlineLayer, stage, toPercent } from './stage.js';
+import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
+import type { Batch2D, Point } from '../core/draw2d.ts';
+import { GameComponent, Status } from './component.ts';
+import { clipInside, makeLayer, maskOutside, outlineLayer, stage, toPercent } from './stage.ts';
 
-const isDom = (c) => !!c?.isDom;
+const isDom = (c: GameComponent | null): boolean => !!c?.isDom;
 
 const deg2rad = Math.PI / 180;
 
-export class Transition extends GameComponent {
-  constructor() {
-    super();
-    this.status = Status.PLAYING;
-    this.prev = null;
-    this.next = null;
-    this.transitionTime = 0;
-    this.timeDisplayed = 0;
-    this.state = 0;
-  }
+export abstract class Transition extends GameComponent {
+  override status: Status = Status.PLAYING;
+  prev: GameComponent | null = null;
+  next: GameComponent | null = null;
+  private transitionTime = 0;
+  private timeDisplayed = 0;
+  private state = 0;
 
-  setTime(ms) { this.transitionTime = ms; }
+  setTime(ms: number): void { this.transitionTime = ms; }
 
-  setPrev(c) { this.prev = c; }
+  setPrev(c: GameComponent | null): void { this.prev = c; }
 
-  setNext(c) { this.next = c; }
+  setNext(c: GameComponent | null): void { this.next = c; }
 
-  getState() { return this.state; }
+  getState(): number { return this.state; }
 
-  async _load() {
+  protected override async _load(): Promise<void> {
     await Promise.all([this.prev?.load(), this.next?.load()]);
   }
 
-  drawLoading(display) {
+  override drawLoading(display: Display): void {
     // The next component may be a mission generating its city.
     // (an HTML prev would cover a mission's load bar, so leave it out then)
     const coversLoadBar = isDom(this.prev) && this.next && !isDom(this.next);
@@ -48,7 +45,9 @@ export class Transition extends GameComponent {
     if (this.next && !this.next.loaded) this.next.drawLoading(display);
   }
 
-  _play(display, msecs) {
+  protected abstract representation(display: Display): void;
+
+  protected override _play(display: Display, msecs: number): void {
     this.timeDisplayed += msecs;
     const t = this.transitionTime > 0 ? this.timeDisplayed / this.transitionTime : 1;
     this.state = Math.min(1, Math.max(0, t));
@@ -59,14 +58,15 @@ export class Transition extends GameComponent {
 
 /** Draw prev, then draw next on top, its alpha going from 0 to 1. */
 class TransitionFade extends Transition {
-  getName() { return 'TransitionFade'; }
+  override getName(): string { return 'TransitionFade'; }
 
-  representation(display) {
+  protected representation(display: Display): void {
     const t = this.getState();
-    if (isDom(this.prev) && this.next && !isDom(this.next)) {
+    const prev = this.prev;
+    if (prev && isDom(prev) && this.next && !isDom(this.next)) {
       // WebGL next, under the HTML prev: fade the prev out instead
       this.next.play(display, 0, null);
-      stage.withEffect({ opacity: 1 - t }, () => this.prev.play(display, 0, null));
+      stage.withEffect({ opacity: 1 - t }, () => prev.play(display, 0, null));
       return;
     }
     this.prev?.play(display, 0, null);
@@ -75,20 +75,24 @@ class TransitionFade extends Transition {
 }
 
 /** Draw prev, then next only inside the mask, then the mask's outline. */
-class TransitionWipe extends Transition {
-  representation(display) {
-    if (!this.next) {
+abstract class TransitionWipe extends Transition {
+  /** The area showing the next component, as triangles (ortho coordinates). */
+  protected abstract maskTriangles(): Point[];
+
+  protected representation(display: Display): void {
+    const next = this.next;
+    if (!next) {
       this.prev?.play(display, 0, null);
       return;
     }
     if (isDom(this.prev) || isDom(this.next)) {
-      this.htmlRepresentation(display);
+      this.htmlRepresentation(display, next);
       return;
     }
     this.prev?.play(display, 0, null);
     const rt = display.acquireTarget();
     try {
-      display.withTarget(rt, () => this.next.play(display, 0, null));
+      display.withTarget(rt, () => next.play(display, 0, null));
       display.draw2dWith((g) => {
         g.screenTriangles(this.maskTriangles(), rt.texture);
         this.renderColor(g, display);
@@ -98,46 +102,45 @@ class TransitionWipe extends Transition {
     }
   }
 
-  renderColor() {}
+  protected renderColor(_g: Batch2D, _display: Display): void {}
 
   /** The mask as one polygon (ortho coordinates) for CSS. */
-  maskPolygon() {
+  protected maskPolygon(): Point[] {
     const t = this.maskTriangles();
-    const pts = [];
+    const pts: Point[] = [];
     for (let i = 0; i < t.length; i += 3) pts.push(t[i + 1]);
     return pts;
   }
 
-  htmlRepresentation(display) {
+  private htmlRepresentation(display: Display, next: GameComponent): void {
     const pts = this.maskPolygon().map((p) => toPercent(p, ORTHO_W, ORTHO_H));
-    if (isDom(this.next)) {
+    if (isDom(next)) {
       this.prev?.play(display, 0, null);
-      stage.withEffect({ clipPath: clipInside(pts) }, () => this.next.play(display, 0, null));
+      stage.withEffect({ clipPath: clipInside(pts) }, () => next.play(display, 0, null));
     } else {
-      this.next.play(display, 0, null);
-      stage.withEffect({ mask: maskOutside(pts) }, () => this.prev.play(display, 0, null));
+      next.play(display, 0, null);
+      stage.withEffect({ mask: maskOutside(pts) }, () => this.prev?.play(display, 0, null));
     }
     this.htmlOutline(pts);
   }
 
-  htmlOutline() {}
+  protected htmlOutline(_pts: Point[]): void {}
 }
 
 /** A band sweeping across the screen at `angle` degrees clockwise. */
 class TransitionAngleWipe extends TransitionWipe {
-  constructor(angle) {
+  constructor(private angle: number) {
     super();
-    this.angle = angle;
   }
 
-  getName() { return `TransitionAngleWipe(${this.angle})`; }
+  override getName(): string { return `TransitionAngleWipe(${this.angle})`; }
 
-  maskTriangles() {
+  protected maskTriangles(): Point[] {
     const len = Math.hypot(ORTHO_W, ORTHO_H); // screen diagonal (widest point)
     const h = len / 2;
     const pos = this.getState() * len;
     const pts = [[-h, -h + pos], [-h, -h], [h, -h], [h, -h + pos]];
-    // glRotatef(angle, 0, 0, -1): clockwise
+    // rotated clockwise
     const r = -this.angle * deg2rad;
     const c = Math.cos(r);
     const s = Math.sin(r);
@@ -145,7 +148,7 @@ class TransitionAngleWipe extends TransitionWipe {
     return [a, b, cc, a, cc, d];
   }
 
-  maskPolygon() {
+  protected override maskPolygon(): Point[] {
     const t = this.maskTriangles();
     return [t[0], t[1], t[2], t[5]];
   }
@@ -155,13 +158,15 @@ class TransitionAngleWipe extends TransitionWipe {
 const STAR_POINTS = 10;
 
 class TransitionStarWipe extends TransitionWipe {
-  getName() { return 'TransitionStarWipe'; }
+  private outline: HTMLDivElement | null = null;
 
-  starPoints() {
+  override getName(): string { return 'TransitionStarWipe'; }
+
+  private starPoints(): Point[] {
     const outDist = ORTHO_W * 1.4 * this.getState();
     const inDist = ORTHO_W * 0.6 * this.getState();
     const rot = 360 / STAR_POINTS;
-    const pts = [];
+    const pts: Point[] = [];
     for (let i = 1; i < STAR_POINTS + 1; i++) {
       const r = (i & 1 ? inDist : outDist);
       const a = i * rot * deg2rad;
@@ -171,20 +176,20 @@ class TransitionStarWipe extends TransitionWipe {
     return pts;
   }
 
-  maskTriangles() {
+  protected maskTriangles(): Point[] {
     const pts = this.starPoints();
-    const tris = [];
+    const tris: Point[] = [];
     for (let i = 0; i < pts.length; i++) tris.push([0, 0], pts[i], pts[(i + 1) % pts.length]);
     return tris;
   }
 
-  renderColor(g, display) {
+  protected override renderColor(g: Batch2D, display: Display): void {
     g.polyline(this.starPoints(), display.px(10), [1, 1, 1, 1], true);
   }
 
-  maskPolygon() { return this.starPoints(); }
+  protected override maskPolygon(): Point[] { return this.starPoints(); }
 
-  htmlOutline(pts) {
+  protected override htmlOutline(pts: Point[]): void {
     this.outline ??= makeLayer('outline');
     stage.show(outlineLayer(this.outline, pts, Math.max(2, (stage.view?.w ?? 640) / 64)));
   }
@@ -192,12 +197,12 @@ class TransitionStarWipe extends TransitionWipe {
 
 /** A sweep like a clock hand, as on a film leader. */
 class TransitionSpin extends TransitionWipe {
-  getName() { return 'TransitionSpin'; }
+  override getName(): string { return 'TransitionSpin'; }
 
-  maskTriangles() {
+  protected maskTriangles(): Point[] {
     const R = 2.0;
     const end = this.getState() * 360;
-    const tris = [];
+    const tris: Point[] = [];
     let prev = [0, R];
     for (let deg = 0; deg < end; deg += 1) {
       const a = Math.min(deg + 1, end) * deg2rad;
@@ -208,10 +213,10 @@ class TransitionSpin extends TransitionWipe {
     return tris;
   }
 
-  maskPolygon() {
+  protected override maskPolygon(): Point[] {
     const R = 2.0;
     const end = this.getState() * 360;
-    const pts = [[0, 0], [0, R]];
+    const pts: Point[] = [[0, 0], [0, R]];
     for (let deg = 3; deg < end + 3; deg += 3) {
       const a = Math.min(deg, end) * deg2rad;
       pts.push([R * Math.sin(a), R * Math.cos(a)]);
@@ -220,9 +225,9 @@ class TransitionSpin extends TransitionWipe {
   }
 }
 
-/** Transition_Factory: fade, spin, starwipe, hwipe, vwipe, or <angle>wipe. */
-export function makeTransition(name) {
-  let t = null;
+/** A transition by name: fade, spin, starwipe, hwipe, vwipe, or <angle>wipe. */
+export function makeTransition(name: string): Transition | null {
+  let t: Transition | null = null;
   if (name === 'fade') t = new TransitionFade();
   else if (name === 'starwipe') t = new TransitionStarWipe();
   else if (name === 'spin') t = new TransitionSpin();
@@ -230,7 +235,7 @@ export function makeTransition(name) {
     const p = name.indexOf('wipe');
     if (p >= 0) {
       const type = name.slice(0, p);
-      let angle;
+      let angle: number;
       if (type === 'v') angle = 180; // vertical convenience token
       else if (type === 'h') angle = 90; // horizontal
       else angle = parseFloat(type) || 0;
