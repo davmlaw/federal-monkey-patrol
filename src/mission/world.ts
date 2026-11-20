@@ -13,6 +13,10 @@ import { Effects } from './effects.ts';
 
 const deg2rad = Math.PI / 180;
 
+// Top-down camera: straight down from this far above the plane, its
+// heading up (2006: 160).
+const TOPDOWN_CAMERA = 400;
+
 // Flight handling. The stick sets a turn rate that the plane reaches in a
 // few hundredths of a second; yaw is about the world's up so the horizon stays level, and the
 // plane banks into turns (visually only).
@@ -244,6 +248,11 @@ export class Projectile extends Entity {
 const BULLET_SPEED = 1500;
 const BULLET_MSECS = 1000;
 
+// The guns: this far either side of the plane's middle, and ahead of it
+// (its wings span about 8).
+const GUN_SPREAD = 1.2;
+const GUN_AHEAD = 3;
+
 // Propeller spin, radians per second: idling plus some per unit of speed.
 const PROP_IDLE = 14;
 const PROP_PER_SPEED = 0.12;
@@ -361,11 +370,14 @@ export class Plane extends Entity {
     }
     // Every shot uses the bomb model (a hack from 2006), though FIRE1 still
     // sends it forward like a bullet.
-    const offset = new THREE.Vector3(5, 0, 0).applyQuaternion(this.object.quaternion);
+    // bullets from guns either side of the nose, bombs from under the wings
+    const q = this.object.quaternion;
+    const offset = new THREE.Vector3(this.firing === 1 ? GUN_SPREAD : 5, 0, 0).applyQuaternion(q);
+    const ahead = new THREE.Vector3(0, 0, this.firing === 1 ? -GUN_AHEAD : 0).applyQuaternion(q);
     for (const sign of [-1, 1]) {
       const bomb = new Projectile(this.bombType);
       bomb.object.scale.setScalar(0.005);
-      bomb.object.position.copy(this.object.position).addScaledVector(offset, sign);
+      bomb.object.position.copy(this.object.position).add(ahead).addScaledVector(offset, sign);
       bomb.object.quaternion.copy(this.object.quaternion);
       bomb.velocity.copy(this.velocity).add(movement);
       if (flat) {
@@ -439,9 +451,10 @@ export class FollowPlaneFilter extends InputFilter implements Controller {
 const STRAFE_SPEED = 400;
 const STRAFE_RESPONSE = 10; // 1/s
 // 1942 controls: how far the plane leans off the middle of the screen while
-// the stick is held (world units at the plane's height, right and ahead).
-const SCREEN_X = 45;
-const SCREEN_Y = 30;
+// the stick is held (world units at the plane's height, right and ahead;
+// the camera is TOPDOWN_CAMERA above it).
+const SCREEN_X = 0.28 * TOPDOWN_CAMERA;
+const SCREEN_Y = 0.19 * TOPDOWN_CAMERA;
 // 1942 controls fly this much slower than the mission's speed (forwards
 // and sideways).
 const SCROLL_FACTOR = 0.8;
@@ -636,8 +649,6 @@ const FOLLOW_LOOK = new THREE.Vector3(0, -6, -45); // keeps the plane low on scr
 const FOLLOW_PITCH = 0.6; // how much of the plane's climb/dive the camera takes
 const YAW_FOLLOW_RATE = 7; // 1/s
 const PITCH_FOLLOW_RATE = 5;
-// Top-down camera: straight down from this height, the plane's heading up.
-const TOPDOWN_HEIGHT = 160.0;
 const CAMERA_BLEND_RATE = 2.5; // mode changes take ~0.4 s
 
 export class CameraMan {
@@ -674,7 +685,7 @@ export class CameraMan {
       const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
       const centre = object.position.clone().addScaledVector(right, -offset.x).addScaledVector(fwd, -offset.y);
-      position.lerp(centre.clone().add(new THREE.Vector3(0, TOPDOWN_HEIGHT, 0)), b);
+      position.lerp(centre.clone().add(new THREE.Vector3(0, TOPDOWN_CAMERA, 0)), b);
       target.lerp(centre.addScaledVector(fwd, 0.01), b);
       up.lerp(fwd, b).normalize();
     }

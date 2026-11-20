@@ -521,7 +521,7 @@ const SPAWN_APART = 600;
 // With no such spot free, a kong waits to come.
 const TOWER_MIN = 1200;
 const TOWER_TOP = 0.1;
-const PERCH_APART = 60; // kongs sharing a tower top stand this far apart
+const PERCH_APART = 0.65; // kongs sharing a tower top stand this many heights apart
 
 /** A mission's say over its kongs (<kongs> in <startconditions>); anything
  *  left out comes from kong.properties. */
@@ -533,6 +533,8 @@ export interface TroopOptions {
   respawnMsecs?: number | null;
   healthMin?: number;
   healthMax?: number;
+  /** Their height (kong.properties' height otherwise). */
+  height?: number;
   /** All of them up on the skyscrapers, staying there. */
   rooftops?: boolean;
 }
@@ -564,6 +566,7 @@ export class KongTroop {
     this.count = opts.count ?? cfg.count;
     this.respawns = opts.respawnMsecs !== null;
     this.rooftops = !!opts.rooftops;
+    if (opts.height) cfg.height = opts.height;
     if (opts.respawnMsecs != null) cfg.respawnMsecs = opts.respawnMsecs;
     if (opts.healthMin != null) cfg.healthMin = opts.healthMin;
     if (opts.healthMax != null) cfg.healthMax = Math.max(cfg.healthMin, opts.healthMax);
@@ -640,7 +643,7 @@ export class KongTroop {
         const y = roofAt(x, z);
         if (y === null || Math.abs(y - b.y1) > 0.5) continue; // something on top of it
         if (![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
-        if (spots.some(([sx, , sz]) => Math.hypot(sx - x, sz - z) < PERCH_APART)) continue;
+        if (spots.some(([sx, , sz]) => Math.hypot(sx - x, sz - z) < PERCH_APART * this.cfg.height)) continue;
         spots.push([x, y, z]);
       }
     }
@@ -665,7 +668,7 @@ export class KongTroop {
         if (Math.hypot((i + 0.5) * BLOCKSIZE - ax, (j + 0.5) * BLOCKSIZE - az) > reach) continue;
         for (const p of this.towerSpots(world, i, j) ?? []) {
           if (Math.hypot(player.position.x - p[0], player.position.z - p[2]) < SPAWN_NEAR) continue;
-          if (this.kongs.some((k) => Math.hypot(k.object.position.x - p[0], k.object.position.z - p[2]) < PERCH_APART)) continue;
+          if (this.kongs.some((k) => Math.hypot(k.object.position.x - p[0], k.object.position.z - p[2]) < PERCH_APART * this.cfg.height)) continue;
           free.push(p);
         }
       }
@@ -718,6 +721,9 @@ export class KongTroop {
       }
     }
   }
+
+  /** How tall they are. */
+  get height(): number { return this.cfg.height; }
 
   /** Kongs still to shoot down: all of them, before they've arrived. */
   remaining(): number { return this.started ? this.living().length : this.count; }

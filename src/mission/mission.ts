@@ -38,6 +38,13 @@ const ENDING_MSECS = 4500;
  *  lost, cleared when one loads. */
 export const lastResult = { title: '', line: '' };
 
+/** Top-down missions' speed range (game.properties topdown_min_speed and
+ *  topdown_max_speed; it doesn't go by altitude). */
+function topdownSpeeds(): { min: number; max: number } {
+  const min = settings.getf('game', 'topdown_min_speed') || 200;
+  return { min, max: Math.max(min, settings.getf('game', 'topdown_max_speed') || 600) };
+}
+
 /** "m:ss" */
 const minutes = (secs: number): string => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
@@ -201,7 +208,7 @@ export class Mission extends GameComponent {
       if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
       if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
     }
-    // <kongs respawn_msecs="N" health_min="N" health_max="N" on="rooftops">count</kongs>,
+    // <kongs respawn_msecs="N" health_min="N" health_max="N" height="N" on="rooftops">count</kongs>,
     // with respawn_msecs="never" for a fixed number to clear, and
     // on="rooftops" to have them all up on the roofs
     if (sc.kongs) {
@@ -214,6 +221,7 @@ export class Mission extends GameComponent {
         count: parseInt(k.textContent ?? '', 10) || 0,
         respawnMsecs: k.getAttribute('respawn_msecs') === 'never' ? null : num('respawn_msecs'),
         rooftops: k.getAttribute('on') === 'rooftops',
+        height: num('height'),
         healthMin: num('health_min'),
         healthMax: num('health_max'),
       };
@@ -282,10 +290,12 @@ export class Mission extends GameComponent {
       }
     } else if (input) {
       const pos = this.player.entity.object.position;
-      const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
-      const { min, max } = (this.constraints ?? new Constraints()).speeds(pos.y);
+      // clear of the roofs, and of kongs standing on them
+      const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE + (this.kongs?.rooftops ? this.kongs.height : 0);
+      const topdown = this.flyMode === FlyMode.TOPDOWN;
+      const { min, max } = topdown ? topdownSpeeds() : (this.constraints ?? new Constraints()).speeds(pos.y);
       // (top-down missions have no throttle: they cruise halfway)
-      const throttle = this.flyMode === FlyMode.TOPDOWN ? 0.5 : input.throttle;
+      const throttle = topdown ? 0.5 : input.throttle;
       this.player.read(input, min + throttle * (max - min), min, safe);
     }
     if (this.roaming) {
