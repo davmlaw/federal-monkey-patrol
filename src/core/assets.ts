@@ -178,13 +178,19 @@ export function loadSound(path: string): Promise<AudioBuffer | null> {
 export interface SoundHandle { done: boolean; stop(): void }
 
 /** Play a decoded buffer. Returns a handle whose .done turns true at the end. */
-export function playSound(buffer: AudioBuffer | null, { loop = false } = {}): SoundHandle {
+export function playSound(buffer: AudioBuffer | null, { loop = false, volume = 1 } = {}): SoundHandle {
   const handle: SoundHandle = { done: true, stop() {} };
   if (!audioCtx || !buffer) return handle;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.loop = loop;
-  src.connect(audioCtx.destination);
+  if (volume === 1) {
+    src.connect(audioCtx.destination);
+  } else {
+    const gain = audioCtx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain).connect(audioCtx.destination);
+  }
   handle.done = false;
   src.onended = () => { handle.done = true; };
   handle.stop = () => { try { src.stop(); } catch { /* already stopped */ } handle.done = true; };

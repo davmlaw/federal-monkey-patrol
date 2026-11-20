@@ -12,6 +12,7 @@ import { gamestats, Stat } from './stats.ts';
 import { makeCameraMan, Player, World, type CameraMan } from './world.ts';
 import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
+import { KongTroop } from './kongs.ts';
 
 // Top-down mode flies this far above the tallest building around the plane.
 const TOPDOWN_CLEARANCE = 150;
@@ -66,6 +67,9 @@ export class Mission extends GameComponent {
   // Set by _load(); the mission is only played once it has loaded.
   private fogplane!: FogPlane;
   private hud!: Container2D;
+  /** The kongs: <kongs> in <startconditions>, or kong.properties' count. */
+  private kongCount: number | null = null;
+  kongs: KongTroop | null = null;
   cameraman!: CameraMan;
   player!: Player;
   world: World | null = null;
@@ -109,6 +113,7 @@ export class Mission extends GameComponent {
     await grid.generate((p: number) => { this.progress = p; });
     this.world = new World(grid);
     this.world.addEntity(this.player.entity);
+    this.kongs = await KongTroop.create(this.kongCount);
     gamestats.reset();
   }
 
@@ -129,6 +134,7 @@ export class Mission extends GameComponent {
       if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
       if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
     }
+    if (sc.kongs) this.kongCount = parseInt(sc.kongs.textContent ?? '', 10) || 0;
     this.player = await Player.create(model.name ?? '', model.skin ?? '', startHeight);
     if (sc.countdown) {
       const cd = xmlStringMap(sc.countdown);
@@ -180,6 +186,7 @@ export class Mission extends GameComponent {
     }
     const wasCrashed = plane.crashed;
     if (!wasCrashed) this.constraints?.restrict(this.player);
+    this.kongs?.update(world, msecs, plane.object);
     world.update(msecs);
     if (plane.crashed && !wasCrashed) {
       // it just hit something

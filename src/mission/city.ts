@@ -15,7 +15,7 @@ import { BAYS, Facade, GROUND_BLOCK, facadeMaterial, groundTexture } from './fac
 const SIDEWALK_WIDTH_RATIO = 20.0 / 512.0;
 const STREET_WIDTH_RATIO = 0.235;
 
-const BLOCKSIZE = 400.0;
+export const BLOCKSIZE = 400.0;
 const BLOCKSPERPATCH = 8;
 export const PATCHES = 8;
 const CHILD_LENGTH = BLOCKSIZE * BLOCKSPERPATCH; // one patch
@@ -1362,6 +1362,12 @@ export class CityGrid {
       }
     }
     if (upgrade) this.addNear(upgrade);
+  }
+
+  /** The collision boxes of block (i, j), the block covering
+   *  [i, i + 1) x [j, j + 1) times BLOCKSIZE (none if it isn't generated). */
+  blockBoxes(i: number, j: number): readonly Box[] {
+    return this.solids.get(CityGrid.key(i, j)) ?? [];
   }
 
   /** The tallest building top within `radius` of (x, z). */

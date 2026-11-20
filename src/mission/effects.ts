@@ -201,6 +201,8 @@ const SMOKE: RGBA = [0.12, 0.11, 0.1, 0.85];
 const SMOKE_END: RGBA = [0.45, 0.44, 0.43, 0];
 const DUST: RGBA = [0.6, 0.58, 0.55, 0.5];
 const DUST_END: RGBA = [0.7, 0.7, 0.7, 0];
+const FUR: RGBA = [0.2, 0.17, 0.15, 0.8];
+const FUR_END: RGBA = [0.4, 0.38, 0.36, 0];
 
 export class Effects {
   readonly group = new THREE.Group();
@@ -244,6 +246,37 @@ export class Effects {
       pos: at.clone(), vel: normal.clone().multiplyScalar(6), life: rand(0.6, 1.0), size0: 3, size1: 10,
       color0: DUST, color1: DUST_END, gravity: -2, drag: 2, bounce: false,
     });
+  }
+
+  /** A bullet striking a kong: a flash and a tuft of dark fur and dust
+   *  thrown back towards the shooter. */
+  furHit(point: THREE.Vector3, normal: THREE.Vector3, dir: THREE.Vector3): void {
+    const back = dir.clone().normalize().negate();
+    this.glow.add({
+      pos: point.clone(), vel: new THREE.Vector3(), life: 0.08, size0: 7, size1: 3,
+      color0: [1, 0.9, 0.7, 0.8], color1: [1, 0.6, 0.2, 0], gravity: 0, drag: 0, bounce: false,
+    });
+    for (let i = 0; i < 5; i++) {
+      const v = back.clone().add(normal).add(randomDir().multiplyScalar(0.8)).normalize().multiplyScalar(rand(10, 35));
+      this.smoke.add({
+        pos: point.clone(), vel: v, life: rand(0.5, 1.0), size0: rand(2, 4), size1: rand(8, 14),
+        color0: FUR, color1: FUR_END, gravity: 20, drag: 3, bounce: false,
+      });
+    }
+  }
+
+  /** Dust thrown up along the street by something heavy landing:
+   *  `size` 1 is about a car's width. */
+  dust(point: THREE.Vector3, size = 1): void {
+    for (let i = 0; i < 40 * size; i++) {
+      const v = randomDir().setY(0).normalize().multiplyScalar(rand(15, 60) * Math.sqrt(size));
+      v.y = rand(2, 12);
+      this.smoke.add({
+        pos: point.clone().add(randomDir().setY(0).multiplyScalar(rand(0, 12) * size)).setY(rand(1, 4)), vel: v,
+        life: rand(1.5, 3), size0: rand(6, 12) * size, size1: rand(25, 45) * size,
+        color0: DUST, color1: DUST_END, gravity: -2, drag: 1.5, bounce: false,
+      });
+    }
   }
 
   /**

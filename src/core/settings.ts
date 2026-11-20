@@ -3,7 +3,7 @@
 
 import { readLines } from './assets.ts';
 
-const MODULES = ['display', 'story', 'physics', 'game', 'main', 'tuner', 'city'];
+const MODULES = ['display', 'story', 'physics', 'game', 'main', 'tuner', 'city', 'kong'];
 
 export type Properties = Map<string, string>;
 

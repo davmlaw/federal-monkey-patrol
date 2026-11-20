@@ -50,6 +50,8 @@ export class Entity {
   bank: THREE.Object3D | null = null;
   /** Collides with the city as a sphere of this radius (null: doesn't). */
   radius: number | null = null;
+  /** Can be shot (and flown into): see intersect() and struck(). */
+  shootable = false;
 
   /** `object`: position, rotation (quaternion) and scale. */
   constructor(public object: THREE.Object3D) {}
@@ -76,8 +78,21 @@ export class Entity {
 
   protected _update(_world: World, _msecs: number): void {}
 
-  /** Ran into the city (see World.update) at `velocity` (world units/s). */
-  hit(_world: World, _hit: Hit, _velocity: THREE.Vector3): void {}
+  /** Ran into the city, or into `target` (a shootable entity), at
+   *  `velocity` (world units/s); see World.update. */
+  hit(_world: World, _hit: Hit, _velocity: THREE.Vector3, _target: Entity | null = null): void {}
+
+  /** Shootable entities: where a sphere of `radius` going from p0 to p1
+   *  first touches this one, or null if it misses. */
+  intersect(_p0: THREE.Vector3, _p1: THREE.Vector3, _radius: number): Hit | null { return null; }
+
+  /** Shootable entities: distance from `point` to the surface (negative
+   *  inside), for blasts. */
+  distanceTo(_point: THREE.Vector3): number { return Infinity; }
+
+  /** Shootable entities: hit for `damage` at `hit`, by something going at
+   *  `velocity`. */
+  struck(_world: World, _hit: Hit, _velocity: THREE.Vector3, _damage: number): void {}
 }
 
 // data/etc/projectiles/<type>.properties -> projectile type
@@ -116,6 +131,12 @@ async function loadProjectileType(type: string): Promise<ProjectileType> {
   return projectileTypes.get(type)!;
 }
 
+// Damage to shootable things (a kong takes kong.properties' health_min to
+// health_max of it).
+const BULLET_DAMAGE = 1;
+const BOMB_DAMAGE = 4; // to everything within the blast
+const BOMB_BLAST_RADIUS = 25;
+
 export class Projectile extends Entity {
   lifetime: number;
   /** Bombs explode where they land; bullets throw up sparks. */
@@ -131,10 +152,17 @@ export class Projectile extends Entity {
     this.radius = 0;
   }
 
-  override hit(world: World, hit: Hit, velocity: THREE.Vector3): void {
+  override hit(world: World, hit: Hit, velocity: THREE.Vector3, target: Entity | null = null): void {
     this.dead = true;
-    if (this.bomb) world.effects.explosion(hit.point.clone().addScaledVector(hit.normal, 2), 0.5);
-    else world.effects.sparks(hit.point, hit.normal, velocity);
+    if (this.bomb) {
+      const at = hit.point.clone().addScaledVector(hit.normal, 2);
+      world.effects.explosion(at, 0.5);
+      world.blast(at, BOMB_BLAST_RADIUS, BOMB_DAMAGE, velocity);
+    } else if (target) {
+      target.struck(world, hit, velocity, BULLET_DAMAGE);
+    } else {
+      world.effects.sparks(hit.point, hit.normal, velocity);
+    }
   }
 
   setLifetime(ms: number): void { this.lifetime = ms; }
@@ -223,6 +251,7 @@ export class Plane extends Entity {
 
   override hit(world: World, hit: Hit, velocity: THREE.Vector3): void {
     if (this.crashed || this.invulnerable > 0) return;
+    // (flying into a kong crashes the plane just the same)
     this.crashed = true;
     const f = (v: THREE.Vector3): string => v.toArray().map((n) => n.toFixed(1)).join(', ');
     console.log(`Plane crashed at (${f(hit.point)}), surface normal (${f(hit.normal)})`);
@@ -562,14 +591,31 @@ export class World {
       from.copy(e.object.position);
       e.update(this, msecs);
       if (e.radius === null || e.isDead()) continue;
-      const hit = this.grid.sweep(from, e.object.position, e.radius);
-      if (hit) e.hit(this, hit, e.object.position.clone().sub(from).multiplyScalar(1000 / msecs));
+      let hit = this.grid.sweep(from, e.object.position, e.radius);
+      let target: Entity | null = null;
+      for (const s of this.entities) {
+        if (!s.shootable || s === e || s.isDead()) continue;
+        const h = s.intersect(from, e.object.position, e.radius);
+        if (h && (!hit || h.t < hit.t)) {
+          hit = h;
+          target = s;
+        }
+      }
+      if (hit) e.hit(this, hit, e.object.position.clone().sub(from).multiplyScalar(1000 / msecs), target);
     }
     this.effects.update(msecs);
     this.entities = this.entities.filter((e) => {
       if (e.isDead()) this.scene.remove(e.object);
       return !e.isDead();
     });
+  }
+
+  /** A blast at `point`: everything shootable within `radius` takes `damage`. */
+  blast(point: THREE.Vector3, radius: number, damage: number, velocity: THREE.Vector3): void {
+    for (const s of this.entities) {
+      if (!s.shootable || s.isDead() || s.distanceTo(point) > radius) continue;
+      s.struck(this, { t: 0, point: point.clone(), normal: new THREE.Vector3(0, 1, 0) }, velocity, damage);
+    }
   }
 
   draw(display: Display, smoothCamera: ChaseCamera): void {
