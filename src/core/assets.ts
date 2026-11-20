@@ -191,3 +191,24 @@ export function playSound(buffer: AudioBuffer | null, { loop = false } = {}): So
   src.start();
   return handle;
 }
+
+/** A synthesised bang: filtered noise dying away over `seconds`, the
+ *  filter closing from `cutoff` Hz (lower is a deeper boom). */
+export function playBang(seconds = 1.8, cutoff = 1200, volume = 0.9): void {
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const n = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** 3;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(cutoff, ctx.currentTime);
+  filter.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + seconds);
+  const gain = ctx.createGain();
+  gain.gain.value = volume;
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start();
+}

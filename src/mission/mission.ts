@@ -2,19 +2,25 @@
 // city with its HUD, until an outcome changes the status.
 
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
-import { Container2D, RIGHT, TOP } from '../core/draw2d.ts';
-import { fetchText } from '../core/assets.ts';
+import { Container2D, LEFT, RIGHT, Text2D, TOP } from '../core/draw2d.ts';
+import { fetchText, playBang } from '../core/assets.ts';
 import { dircheck, settings } from '../core/settings.ts';
 import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LoadBar } from './hud.ts';
+import { ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 
 // Top-down mode flies this far above the tallest building around the plane.
 const TOPDOWN_CLEARANCE = 150;
+// After a crash: how long the wreck burns before the next plane, how high
+// over the rooftops it comes back, and how long it can't crash again.
+const RESPAWN_MSECS = 2500;
+const RESPAWN_CLEARANCE = 120;
+const INVULNERABLE_MSECS = 3000;
+const GAME_OVER_MSECS = 4000; // the last crash, then "GAME OVER", then lost
 
 /** The Giant Claw. Built from <claw>, but nothing calls update() yet, so
  *  its anger never changes. */
@@ -51,6 +57,12 @@ export class Mission extends GameComponent {
   /** City generation progress, 0..1, shown by the load bar. */
   private progress = 0;
   private loadbar: LoadBar | null = null;
+  /** Planes left, counting the one flying (game.properties `lives`). */
+  private lives = 3;
+  private livesDisplay!: LivesDisplay;
+  /** Counts down while the wreck burns (0: flying). */
+  private crashTimer = 0;
+  private gameOver = new Text2D('GAME OVER', 0.6);
   // Set by _load(); the mission is only played once it has loaded.
   private fogplane!: FogPlane;
   private hud!: Container2D;
@@ -84,6 +96,11 @@ export class Mission extends GameComponent {
       this.hud.add(this.clawalert, RIGHT);
     }
     if (this.countdowntimer) this.hud.add(this.countdowntimer, TOP | RIGHT);
+    this.lives = settings.geti('game', 'lives') || 3;
+    this.livesDisplay = await LivesDisplay.create(this.lives);
+    this.hud.add(this.livesDisplay, TOP | LEFT);
+    this.livesDisplay.position.x += 0.01;
+    this.livesDisplay.position.y -= 0.06; // below the FPS readout
     this.cameraman = makeCameraMan();
 
     // The city, generated patch by patch behind the load bar
@@ -145,13 +162,32 @@ export class Mission extends GameComponent {
     const world = this.world!;
     gamestats.addGameTime(msecs);
     this.countdowntimer?.update(gamestats.get(Stat.GAME_SECONDS));
-    if (input) {
+    const plane = this.player.entity;
+    if (plane.crashed) {
+      this.crashTimer -= msecs;
+      if (this.crashTimer <= 0) {
+        if (this.lives > 0) {
+          const pos = plane.object.position;
+          this.player.respawn(world.grid.maxHeightNear(pos.x, pos.z) + RESPAWN_CLEARANCE, INVULNERABLE_MSECS);
+        } else {
+          this.setStatus(Status.LOST);
+        }
+      }
+    } else if (input) {
       const pos = this.player.entity.object.position;
       const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
       this.player.read(input, this.speedFor(input.throttle), safe);
     }
-    this.constraints?.restrict(this.player);
+    const wasCrashed = plane.crashed;
+    if (!wasCrashed) this.constraints?.restrict(this.player);
     world.update(msecs);
+    if (plane.crashed && !wasCrashed) {
+      // it just hit something
+      this.lives--;
+      this.livesDisplay.lives = this.lives;
+      this.crashTimer = this.lives > 0 ? RESPAWN_MSECS : GAME_OVER_MSECS;
+      playBang();
+    }
   }
 
   private draw(display: Display, msecs: number): void {
@@ -160,6 +196,7 @@ export class Mission extends GameComponent {
     this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs);
     this.world!.draw(display, this.cameraman.getCamera());
     display.draw2d(this.hud);
+    if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
     if (msecs) {
       this.fps.update(msecs);
       display.draw2d(fpsOverlay(this.fps));

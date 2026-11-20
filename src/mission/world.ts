@@ -8,7 +8,8 @@ import { loadProperties } from '../core/settings.ts';
 import { Button, InputFilter, type Axis, type Input } from '../core/input.ts';
 import type { Display } from '../core/display.ts';
 import { gamestats, Stat } from './stats.ts';
-import type { CityGrid } from './city.ts';
+import type { CityGrid, Hit } from './city.ts';
+import { Effects } from './effects.ts';
 
 const deg2rad = Math.PI / 180;
 
@@ -47,6 +48,8 @@ export class Entity {
   controller: Controller | null = null;
   /** A group inside `object` that rolls the model into turns (visual only). */
   bank: THREE.Object3D | null = null;
+  /** Collides with the city as a sphere of this radius (null: doesn't). */
+  radius: number | null = null;
 
   /** `object`: position, rotation (quaternion) and scale. */
   constructor(public object: THREE.Object3D) {}
@@ -72,6 +75,9 @@ export class Entity {
   }
 
   protected _update(_world: World, _msecs: number): void {}
+
+  /** Ran into the city (see World.update) at `velocity` (world units/s). */
+  hit(_world: World, _hit: Hit, _velocity: THREE.Vector3): void {}
 }
 
 // data/etc/projectiles/<type>.properties -> projectile type
@@ -112,6 +118,8 @@ async function loadProjectileType(type: string): Promise<ProjectileType> {
 
 export class Projectile extends Entity {
   lifetime: number;
+  /** Bombs explode where they land; bullets throw up sparks. */
+  bomb = false;
 
   constructor(ptype: ProjectileType) {
     // (a type with no drawable throws here, as it always has)
@@ -120,6 +128,13 @@ export class Projectile extends Entity {
     holder.add(mesh);
     super(holder);
     this.lifetime = ptype.lifetime;
+    this.radius = 0;
+  }
+
+  override hit(world: World, hit: Hit, velocity: THREE.Vector3): void {
+    this.dead = true;
+    if (this.bomb) world.effects.explosion(hit.point.clone().addScaledVector(hit.normal, 2), 0.5);
+    else world.effects.sparks(hit.point, hit.normal, velocity);
   }
 
   setLifetime(ms: number): void { this.lifetime = ms; }
@@ -188,16 +203,44 @@ function splitPropeller(mesh: THREE.Mesh, noseZ: number, shaftY: number): THREE.
   return pivot;
 }
 
+// The plane collides as a sphere this big (its wings span about 8).
+const PLANE_RADIUS = 2.5;
+const BLINK_MSECS = 120; // flashing while invulnerable
+
 export class Plane extends Entity {
   reloadTime = 0;
   /** The spinning propeller, split off the model (see splitPropeller). */
   propeller: THREE.Object3D | null = null;
+  /** Hit something: a wreck until respawned (see Player.respawn). */
+  crashed = false;
+  /** Milliseconds left without collisions, after a respawn. */
+  invulnerable = 0;
 
   constructor(object: THREE.Object3D, private bombType: ProjectileType) {
     super(object);
+    this.radius = PLANE_RADIUS;
+  }
+
+  override hit(world: World, hit: Hit, velocity: THREE.Vector3): void {
+    if (this.crashed || this.invulnerable > 0) return;
+    this.crashed = true;
+    const f = (v: THREE.Vector3): string => v.toArray().map((n) => n.toFixed(1)).join(', ');
+    console.log(`Plane crashed at (${f(hit.point)}), surface normal (${f(hit.normal)})`);
+    this.object.position.copy(hit.point).addScaledVector(hit.normal, PLANE_RADIUS);
+    this.object.visible = false;
+    world.effects.explosion(this.object.position, 1, velocity);
+    this.setController(null);
+    this.velocity.set(0, 0, 0);
+    this.firing = 0;
+    gamestats.inc(Stat.PLAYER_DEATHS);
   }
 
   protected override _update(world: World, msecs: number): void {
+    if (this.crashed) return;
+    if (this.invulnerable > 0) {
+      this.invulnerable = Math.max(0, this.invulnerable - msecs);
+      this.object.visible = this.invulnerable <= 0 || Math.floor(this.invulnerable / BLINK_MSECS) % 2 === 0;
+    }
     if (this.propeller) {
       const speed = this.controller?.speed ?? 0;
       this.propeller.rotation.z += (PROP_IDLE + speed * PROP_PER_SPEED) * msecs * 0.001;
@@ -222,7 +265,8 @@ export class Plane extends Entity {
       bomb.object.position.copy(this.object.position).addScaledVector(offset, sign);
       bomb.object.quaternion.copy(this.object.quaternion);
       bomb.velocity.copy(this.velocity).add(movement);
-      bomb.setLifetime(1000);
+      bomb.setLifetime(this.firing === 1 ? 1000 : 5000);
+      bomb.bomb = this.firing === 2;
       world.addEntity(bomb);
     }
     this.reloadTime = 75;
@@ -240,6 +284,14 @@ export class FollowPlaneFilter extends InputFilter implements Controller {
   speed = 0;
   yawRate = 0; // degrees per second
   pitchRate = 0;
+
+  /** Forget the stick (after a respawn). */
+  reset(): void {
+    this.axis = { x: 0, y: 0 };
+    this.firing = 0;
+    this.yawRate = 0;
+    this.pitchRate = 0;
+  }
 
   protected override _read(input: Input): void {
     this.axis = input.getAxis();
@@ -292,6 +344,11 @@ const BANK_DEGREES = 25;
 export class TopDownPlaneFilter extends FollowPlaneFilter {
   strafe: Axis = { x: 0, y: 0 };
   safeHeight = 0; // set each frame by the mission
+
+  override reset(): void {
+    super.reset();
+    this.strafe = { x: 0, y: 0 };
+  }
 
   override control(ent: Entity, msecs: number): void {
     const q = ent.object.quaternion;
@@ -358,6 +415,21 @@ export class Player {
   }
 
   modeName(): string { return MODE_NAMES[this.mode]; }
+
+  /** Put the wreck back together at `height`, level, on its old heading,
+   *  and safe from collisions for `invulnerable` milliseconds. */
+  respawn(height: number, invulnerable: number): void {
+    const p = this.entity;
+    const { yaw } = yawPitch(p.object.quaternion);
+    p.object.quaternion.setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'));
+    p.object.position.y = height;
+    if (p.bank) p.bank.rotation.set(0, 0, 0);
+    for (const c of this.controllers) c.reset();
+    p.crashed = false;
+    p.invulnerable = invulnerable;
+    p.object.visible = true;
+    this.setMode(this.mode);
+  }
 
   /** speed: the throttle, already mapped to the mission's speed range;
    *  safeHeight: the height top-down mode climbs to (clear of the roofs). */
@@ -463,6 +535,7 @@ export class World {
   scene = new THREE.Scene();
   entities: Entity[] = [];
   camera: THREE.PerspectiveCamera;
+  effects = new Effects();
 
   constructor(public grid: CityGrid) {
     this.scene.fog = new THREE.Fog(new THREE.Color(...FOG_COLOR), FOG_START, FOG_END);
@@ -473,7 +546,7 @@ export class World {
     const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 1.0, 0.8), Math.PI);
     sun.position.set(1, 5, 1);
     this.scene.add(ambient, sun, sun.target);
-    this.scene.add(grid.group);
+    this.scene.add(grid.group, this.effects.group);
     this.camera = new THREE.PerspectiveCamera(FOV / 2, 4 / 3, NEAR_DIST, FAR_DIST);
   }
 
@@ -484,7 +557,15 @@ export class World {
 
   update(msecs: number): void {
     if (!msecs) return;
-    for (const e of this.entities.slice()) e.update(this, msecs);
+    const from = new THREE.Vector3();
+    for (const e of this.entities.slice()) {
+      from.copy(e.object.position);
+      e.update(this, msecs);
+      if (e.radius === null || e.isDead()) continue;
+      const hit = this.grid.sweep(from, e.object.position, e.radius);
+      if (hit) e.hit(this, hit, e.object.position.clone().sub(from).multiplyScalar(1000 / msecs));
+    }
+    this.effects.update(msecs);
     this.entities = this.entities.filter((e) => {
       if (e.isDead()) this.scene.remove(e.object);
       return !e.isDead();
@@ -502,5 +583,6 @@ export class World {
 
   dispose(): void {
     this.grid.dispose();
+    this.effects.dispose();
   }
 }

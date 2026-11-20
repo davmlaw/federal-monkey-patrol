@@ -244,7 +244,16 @@ interface Builder {
   layer: number;
   tri(a: Vertex, b: Vertex, c: Vertex): void;
   quad(a: Vertex, b: Vertex, c: Vertex, d: Vertex): void;
+  /** Notes a solid: the bounding box of `ring` (shrunk about its centre by
+   *  k) from y0 to y1, for collisions. */
+  solid(ring: Corner[], y0: number, y1: number, k?: number): void;
 }
+
+/** An axis-aligned box, for collisions. */
+export interface Box { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number }
+
+/** Where a sweep hit something (see CityGrid.sweep). */
+export interface Hit { t: number; point: THREE.Vector3; normal: THREE.Vector3 }
 
 class GeomBuilder implements Builder {
   private pos: number[] = [];
@@ -253,6 +262,27 @@ class GeomBuilder implements Builder {
   private lay: number[] = [];
   color: RGB | null = [1, 1, 1]; // vertex colour for what's added next
   layer = 0; // facade texture layer for what's added next
+  /** Where solid() notes collision boxes (only the lite builders do). */
+  boxes: Box[] | null = null;
+
+  solid(ring: Corner[], y0: number, y1: number, k = 1): void {
+    if (!this.boxes || y1 <= y0) return;
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let z0 = Infinity;
+    let z1 = -Infinity;
+    for (const [x, z] of ring) {
+      x0 = Math.min(x0, x);
+      x1 = Math.max(x1, x);
+      z0 = Math.min(z0, z);
+      z1 = Math.max(z1, z);
+    }
+    const cx = (x0 + x1) / 2;
+    const cz = (z0 + z1) / 2;
+    const hx = (x1 - x0) / 2 * k;
+    const hz = (z1 - z0) / 2 * k;
+    this.boxes.push({ x0: cx - hx, y0, z0: cz - hz, x1: cx + hx, y1, z1: cz + hz });
+  }
 
   tri(a: Vertex, b: Vertex, c: Vertex): void {
     this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
@@ -284,7 +314,7 @@ class GeomBuilder implements Builder {
 /** A GeomBuilder that throws its geometry away: the far (lite) versions of
  *  buildings run the same code, so they use the same random numbers, but
  *  send the detail they leave out here. */
-const NULL: Builder = { tri() {}, quad() {}, color: null, layer: 0 };
+const NULL: Builder = { tri() {}, quad() {}, solid() {}, color: null, layer: 0 };
 
 // ======================================================= buildings: styling
 //
@@ -409,6 +439,7 @@ interface FaceOptions { layer: number; ws: number; v0: number; v1: number; rnd?:
 
 function faces(gb: Builder, ring: Corner[], y0: number, y1: number, { layer, ws, v0, v1, rnd = null }: FaceOptions): void {
   gb.layer = layer;
+  gb.solid(ring, y0, y1);
   const n = ring.length;
   for (let i = 0; i < n; i++) {
     const a = ring[i];
@@ -442,6 +473,7 @@ function roofCap(gb: Builder, ring: Corner[], y: number): void {
 /** A solid block (prism) of the given colour on the trim builder. */
 function block(gb: Builder, ring: Corner[], y0: number, y1: number, color: RGB, top = ring, capped = true): void {
   gb.color = color;
+  gb.solid(ring, y0, y1);
   walls(gb, ring, top, y0, y1);
   if (capped) cap(gb, top, y1);
 }
@@ -451,6 +483,11 @@ function point(gb: Builder, ring: Corner[], y0: number, y1: number, color: RGB):
   const cx = ring.reduce((t, p) => t + p[0], 0) / ring.length;
   const cz = ring.reduce((t, p) => t + p[1], 0) / ring.length;
   gb.color = color;
+  // a pyramid, as three boxes narrowing upwards
+  const h = y1 - y0;
+  gb.solid(ring, y0, y0 + h * 0.3, 0.85);
+  gb.solid(ring, y0 + h * 0.3, y0 + h * 0.6, 0.5);
+  gb.solid(ring, y0 + h * 0.6, y1, 0.2);
   const apex = [cx, y1, cz, 0, 0];
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i];
@@ -1050,14 +1087,17 @@ interface Patch {
   centre: Spot;
   data: PatchData;
   tops: Map<string, number>;
+  /** The keys of this patch's blocks in CityGrid.solids. */
+  solidKeys: string[];
   trees: THREE.Group;
   far: THREE.Group;
   near: PatchNear | null;
 }
 
 /** Everything a patch always has: grass, trees, and the far (lite)
- *  version of its buildings. */
-export function buildPatchBase(data: PatchData, materials: CityMaterials): { group: THREE.Group; trees: THREE.Group; far: THREE.Group } {
+ *  version of its buildings, with the boxes the buildings collide with
+ *  (taken from the lite version, whose walls go down to the street). */
+export function buildPatchBase(data: PatchData, materials: CityMaterials): { group: THREE.Group; trees: THREE.Group; far: THREE.Group; boxes: Box[] } {
   const group = new THREE.Group();
   const add = (parent: THREE.Object3D, geom: THREE.BufferGeometry | null, mat: THREE.Material): THREE.Mesh | null => {
     if (!geom) return null;
@@ -1076,12 +1116,15 @@ export function buildPatchBase(data: PatchData, materials: CityMaterials): { gro
   const far = new THREE.Group();
   const fb = new GeomBuilder();
   const trim = new GeomBuilder();
+  const boxes: Box[] = [];
+  fb.boxes = boxes;
+  trim.boxes = boxes;
   for (const b of data.buildings) addBuilding(fb, trim, b, true);
   for (const s of data.skyscrapers) addSkyscraper(fb, trim, s, true);
   add(far, fb.build({ layers: true }), materials.facades);
   add(far, trim.build({ colors: true }), materials.trim);
   group.add(far);
-  return { group, trees, far };
+  return { group, trees, far, boxes };
 }
 
 /** The near (full detail) version of a patch's buildings, with the street
@@ -1182,6 +1225,8 @@ export class CityGrid {
   /** Patches [i, j] still to generate, nearest first. */
   private queue: number[][] = [];
   private centre = { x: 0, z: 0 };
+  /** Collision boxes by block key. */
+  private solids = new Map<string, Box[]>();
 
   constructor(private materials: CityMaterials) {
     this.ground = buildGround(materials);
@@ -1194,7 +1239,16 @@ export class CityGrid {
     const x = (i + 0.5) * CHILD_LENGTH;
     const z = (j + 0.5) * CHILD_LENGTH;
     const data = generatePatch(x, z);
-    const base = buildPatchBase(data, this.materials);
+    const { boxes, ...base } = buildPatchBase(data, this.materials);
+    // collision boxes, by block (every building stands inside one block)
+    const solidKeys = new Set<string>();
+    for (const b of boxes) {
+      const k = CityGrid.key(Math.floor((b.x0 + b.x1) / 2 / BLOCKSIZE), Math.floor((b.z0 + b.z1) / 2 / BLOCKSIZE));
+      let list = this.solids.get(k);
+      if (!list) this.solids.set(k, list = []);
+      list.push(b);
+      solidKeys.add(k);
+    }
     // tallest roof per block, for maxHeightNear()
     const tops = new Map<string, number>();
     const note = (bx: number, bz: number, h: number): void => {
@@ -1207,7 +1261,7 @@ export class CityGrid {
       for (let k = 0; k < sk.step.length; k += 2) h += sk.step[k] * sk.windowSize;
       note(sk.x, sk.z, h * 1.15 + sk.spire);
     }
-    const patch: Patch = { ...base, centre: { x, z }, data, tops, near: null };
+    const patch: Patch = { ...base, centre: { x, z }, data, tops, solidKeys: [...solidKeys], near: null };
     this.group.add(patch.group);
     this.patches.set(CityGrid.key(i, j), patch);
     return patch;
@@ -1266,6 +1320,7 @@ export class CityGrid {
         if (!wanted.has(k)) {
           this.group.remove(patch.group);
           disposeGroup(patch.group, this.materials);
+          for (const sk of patch.solidKeys) this.solids.delete(sk);
           this.patches.delete(k);
         }
       }
@@ -1322,6 +1377,61 @@ export class CityGrid {
       }
     }
     return h;
+  }
+
+  /**
+   * The first thing the segment p0 -> p1 hits, for a sphere of `radius`:
+   * a building (from the boxes the lite buildings note) or the ground.
+   * Returns where along it (t, 0..1), the point and the surface normal.
+   */
+  sweep(p0: THREE.Vector3, p1: THREE.Vector3, radius = 0): Hit | null {
+    let best: Hit | null = null;
+    const d = p1.clone().sub(p0);
+    if (p1.y < radius && d.y < 0) {
+      const t = Math.max(0, (radius - p0.y) / d.y);
+      best = { t, point: p0.clone().addScaledVector(d, t).setY(0), normal: new THREE.Vector3(0, 1, 0) };
+    }
+    const r = radius;
+    const i0 = Math.floor((Math.min(p0.x, p1.x) - r) / BLOCKSIZE);
+    const i1 = Math.floor((Math.max(p0.x, p1.x) + r) / BLOCKSIZE);
+    const j0 = Math.floor((Math.min(p0.z, p1.z) - r) / BLOCKSIZE);
+    const j1 = Math.floor((Math.max(p0.z, p1.z) + r) / BLOCKSIZE);
+    const o = [p0.x, p0.y, p0.z];
+    const dir = [d.x, d.y, d.z];
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        for (const b of this.solids.get(CityGrid.key(i, j)) ?? []) {
+          // slab test against the box grown by the radius
+          const lo = [b.x0 - r, b.y0 - r, b.z0 - r];
+          const hi = [b.x1 + r, b.y1 + r, b.z1 + r];
+          let tin = 0;
+          let tout = best ? best.t : 1;
+          let axis = -1;
+          let sign = 0;
+          let miss = false;
+          for (let a = 0; a < 3 && !miss; a++) {
+            if (Math.abs(dir[a]) < 1e-9) {
+              if (o[a] < lo[a] || o[a] > hi[a]) miss = true;
+              continue;
+            }
+            let ta = (lo[a] - o[a]) / dir[a];
+            let tb = (hi[a] - o[a]) / dir[a];
+            let s = -1;
+            if (ta > tb) { [ta, tb] = [tb, ta]; s = 1; }
+            if (ta > tin) { tin = ta; axis = a; sign = s; }
+            tout = Math.min(tout, tb);
+            if (tin > tout) miss = true;
+          }
+          if (miss) continue;
+          // (axis -1: it starts inside; call that a hit from above)
+          const normal = new THREE.Vector3(0, 1, 0);
+          if (axis >= 0) normal.set(0, 0, 0).setComponent(axis, sign);
+          const point = p0.clone().addScaledVector(d, tin).addScaledVector(normal, -r);
+          best = { t: tin, point, normal };
+        }
+      }
+    }
+    return best;
   }
 
   dispose(): void {

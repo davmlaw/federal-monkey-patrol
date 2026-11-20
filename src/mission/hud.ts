@@ -80,6 +80,31 @@ export class ClawAlert extends Transitional2D {
   }
 }
 
+/** Lives left: a row of Harlow's heads. */
+export class LivesDisplay extends Drawable2D {
+  lives = 0;
+
+  private constructor(private head: Image, private max: number, private gap: number) {
+    super(max * (head.getWidth() + gap), head.getHeight());
+  }
+
+  static async create(max: number, h = 0.06): Promise<LivesDisplay> {
+    const head = await Image.load('data/story/harlow_headshot.png');
+    head.setHeight(h);
+    const d = new LivesDisplay(head, max, h * 0.15);
+    d.lives = max;
+    return d;
+  }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    const step = this.head.getWidth() + this.gap;
+    for (let i = 0; i < Math.min(this.lives, this.max); i++) {
+      this.head.position = { x: this.left() + step * (i + 0.5), y: 0 };
+      this.head.draw(g, alpha);
+    }
+  }
+}
+
 const AVERAGE_OVER_FRAMES = 200;
 
 export class FPSCounter {
