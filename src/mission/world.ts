@@ -442,8 +442,13 @@ const STRAFE_RESPONSE = 10; // 1/s
 // the stick is held (world units at the plane's height, right and ahead).
 const SCREEN_X = 45;
 const SCREEN_Y = 30;
-// Steering controls: degrees per second at full stick.
-const STEER_RATE = 90;
+// 1942 controls fly this much slower than the mission's speed (forwards
+// and sideways).
+const SCROLL_FACTOR = 0.8;
+// Steering controls: at full stick the plane turns in a circle this big
+// (radius, world units: round a city block), however fast it's going.
+const STEER_RADIUS = 250;
+const MAX_BANK = 60; // degrees
 // Top-down mode keeps the plane up above the rooftops: it climbs
 // (never dives) towards `safeHeight`, easing in, nose up while it climbs.
 const CLIMB_RATE = 450; // units per second, at most
@@ -479,22 +484,27 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
 
   override control(ent: Entity, msecs: number): void {
     const q = ent.object.quaternion;
-    let { yaw } = yawPitch(q);
+    let { yaw, pitch } = yawPitch(q);
     const stick = (v: number): number => Math.max(-1, Math.min(1, v));
     if (this.steer) {
-      this.yawRate += (-stick(this.axis.x) * STEER_RATE - this.yawRate) * damp(STICK_RESPONSE, msecs);
+      const rate = Math.max(this.speed, this.minSpeed) / STEER_RADIUS / deg2rad; // degrees per second
+      this.yawRate += (-stick(this.axis.x) * rate - this.yawRate) * damp(STICK_RESPONSE, msecs);
       yaw += this.yawRate * msecs / 1000 * deg2rad;
     } else {
       this.yawRate = 0;
     }
     this.pitchRate = 0;
-    q.slerp(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ')), damp(LEVEL_RATE, msecs));
+    // level out (the heading turns exactly as steered: smoothing it here
+    // would make the turn rate depend on the frame rate)
+    pitch *= 1 - damp(LEVEL_RATE, msecs);
+    q.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
     const k = damp(STRAFE_RESPONSE, msecs);
     this.strafe.x += (stick(this.axis.x) - this.strafe.x) * k;
     this.strafe.y += (stick(this.axis.y) - this.strafe.y) * k;
     const side = this.steer ? 0 : this.strafe.x;
     this.screen = { x: side * SCREEN_X, y: this.steer ? 0 : this.strafe.y * SCREEN_Y };
-    this.bank(ent, this.steer ? this.yawRate * BANK_PER_YAW : -side * BANK_DEGREES, msecs);
+    const steerBank = Math.max(-MAX_BANK, Math.min(MAX_BANK, this.yawRate * BANK_PER_YAW));
+    this.bank(ent, this.steer ? steerBank : -side * BANK_DEGREES, msecs);
     // velocity is in the plane's own frame; use the level frame so any
     // leftover pitch doesn't push it up or down
     const climb = Math.min(CLIMB_RATE, Math.max(0, (this.safeHeight - ent.object.position.y) * CLIMB_EASE));
@@ -502,8 +512,9 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
       const x = ent.bank.rotation.x;
       ent.bank.rotation.x = x + (climb * CLIMB_NOSE_UP * deg2rad - x) * damp(BANK_RESPONSE, msecs);
     }
-    const forward = Math.max(this.minSpeed, this.speed + this.strafe.y * Math.max(0, this.speed - this.minSpeed));
-    const v = new THREE.Vector3(side * STRAFE_SPEED, 0, -forward);
+    const slow = this.steer ? 1 : SCROLL_FACTOR;
+    const forward = slow * Math.max(this.minSpeed, this.speed + this.strafe.y * Math.max(0, this.speed - this.minSpeed));
+    const v = new THREE.Vector3(slow * side * STRAFE_SPEED, 0, -forward);
     v.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     v.y = climb;
     v.applyQuaternion(q.clone().invert());

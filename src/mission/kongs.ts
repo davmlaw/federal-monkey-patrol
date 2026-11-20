@@ -514,9 +514,14 @@ export interface Area { x: number; z: number; r: number }
 // plane, and apart from each other.
 const SPAWN_NEAR = 700;
 const SPAWN_APART = 600;
-// Rooftop kongs stand on roofs at least this high (not on lobbies and
-// storefronts).
-const ROOF_MIN = 40;
+// Rooftop kongs go up on the tall skyscrapers, near the top where they're
+// easy to see: on flat spots within the top TOWER_TOP of the tower's
+// highest place to stand, on towers whose top is at least TOWER_MIN (the
+// tallest reach about 2000; a quarter of blocks have one over about 1400).
+// With no such spot free, a kong waits to come.
+const TOWER_MIN = 1200;
+const TOWER_TOP = 0.1;
+const PERCH_APART = 60; // kongs sharing a tower top stand this far apart
 
 /** A mission's say over its kongs (<kongs> in <startconditions>); anything
  *  left out comes from kong.properties. */
@@ -528,7 +533,7 @@ export interface TroopOptions {
   respawnMsecs?: number | null;
   healthMin?: number;
   healthMax?: number;
-  /** All of them up on the roofs, staying there. */
+  /** All of them up on the skyscrapers, staying there. */
   rooftops?: boolean;
 }
 
@@ -545,6 +550,8 @@ export class KongTroop {
   /** No more come once these are down. */
   readonly respawns: boolean;
   readonly rooftops: boolean;
+  /** towerSpots(), by block. */
+  private spots = new Map<string, [number, number, number][]>();
   public count: number;
 
   private constructor(
@@ -610,44 +617,68 @@ export class KongTroop {
     return best;
   }
 
-  /** Somewhere flat on a roof in the patrol area, not too near the plane
-   *  and away from other kongs: (x, roof height, z), or null. */
-  private roofPoint(world: World, player: THREE.Object3D): [number, number, number] | null {
-    const { x: ax, z: az, r } = this.area;
-    const h = this.cfg.height;
+  /** Flat spots on the skyscraper tops of block (i, j) (cached; undefined
+   *  until the block's patch has been generated). */
+  private towerSpots(world: World, i: number, j: number): [number, number, number][] | undefined {
+    const key = `${i},${j}`;
+    const cached = this.spots.get(key);
+    if (cached) return cached;
+    const boxes = world.grid.blockBoxes(i, j);
+    if (!boxes.length) return undefined;
+    const e = 0.15 * this.cfg.height;
     const roofAt = (x: number, z: number): number | null => {
       const hit = world.grid.sweep(new THREE.Vector3(x, 5000, z), new THREE.Vector3(x, -10, z), 0);
       return hit && hit.normal.y > 0.9 ? hit.point.y : null;
     };
-    let best: [number, number, number] | null = null;
-    let bestScore = -1;
-    for (let i = 0; i < 40; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = Math.sqrt(Math.random()) * r * 0.8;
-      const x = ax + Math.sin(a) * d;
-      const z = az + Math.cos(a) * d;
-      const y = roofAt(x, z);
-      if (y === null || y < ROOF_MIN || y > this.cfg.climbMax) continue;
-      // room to stand: the same roof all round
-      const e = 0.25 * h;
-      if (![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
-      let apart = Infinity;
-      for (const k of this.kongs) apart = Math.min(apart, Math.hypot(k.object.position.x - x, k.object.position.z - z));
-      const score = Math.min(apart / SPAWN_APART, Math.hypot(player.position.x - x, player.position.z - z) / SPAWN_NEAR);
-      if (score > bestScore) {
-        best = [x, y, z];
-        bestScore = score;
+    const spots: [number, number, number][] = [];
+    for (const b of boxes) {
+      if (b.y1 < TOWER_MIN * (1 - TOWER_TOP)) continue;
+      // the middle of its top and halfway out to the corners
+      for (const [fx, fz] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+        const x = b.x0 + (b.x1 - b.x0) * fx;
+        const z = b.z0 + (b.z1 - b.z0) * fz;
+        const y = roofAt(x, z);
+        if (y === null || Math.abs(y - b.y1) > 0.5) continue; // something on top of it
+        if (![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
+        if (spots.some(([sx, , sz]) => Math.hypot(sx - x, sz - z) < PERCH_APART)) continue;
+        spots.push([x, y, z]);
       }
-      if (score >= 1) break;
     }
-    return best;
+    // only near the top: the highest spot's level and a little below it
+    const top = Math.max(0, ...spots.map((p) => p[1]));
+    const high = top >= TOWER_MIN ? spots.filter((p) => p[1] >= top * (1 - TOWER_TOP)) : [];
+    this.spots.set(key, high);
+    return high;
+  }
+
+  /** A free spot on a skyscraper top in the patrol area, not too near the
+   *  plane: (x, roof height, z), or null. */
+  private towerPoint(world: World, player: THREE.Object3D): [number, number, number] | null {
+    const { x: ax, z: az, r } = this.area;
+    const reach = r;
+    const ci = Math.floor(ax / BLOCKSIZE);
+    const cj = Math.floor(az / BLOCKSIZE);
+    const n = Math.ceil(reach / BLOCKSIZE);
+    const free: [number, number, number][] = [];
+    for (let i = ci - n; i <= ci + n; i++) {
+      for (let j = cj - n; j <= cj + n; j++) {
+        if (Math.hypot((i + 0.5) * BLOCKSIZE - ax, (j + 0.5) * BLOCKSIZE - az) > reach) continue;
+        for (const p of this.towerSpots(world, i, j) ?? []) {
+          if (Math.hypot(player.position.x - p[0], player.position.z - p[2]) < SPAWN_NEAR) continue;
+          if (this.kongs.some((k) => Math.hypot(k.object.position.x - p[0], k.object.position.z - p[2]) < PERCH_APART)) continue;
+          free.push(p);
+        }
+      }
+    }
+    return free.length ? free[Math.floor(Math.random() * free.length)] : null;
   }
 
   private spawn(world: World, player: THREE.Object3D): void {
+    const roof = this.rooftops ? this.towerPoint(world, player) : null;
+    if (this.rooftops && !roof) return; // none free: try again later
     const kong = this.make();
     kong.ear = player;
     kong.home = this.area;
-    const roof = this.rooftops ? this.roofPoint(world, player) : null;
     if (roof) {
       kong.placeAt(roof[0], roof[2], Math.random() * Math.PI * 2, roof[1]);
       kong.perched = true;
