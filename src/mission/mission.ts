@@ -28,6 +28,9 @@ const RADAR_RANGE = 2400;
 const RADAR_SIZE = 0.2;
 // After losing a plane for flying out of bounds: this long a message shows.
 const OUT_MESSAGE_MSECS = 3000;
+// With no patrol area, the kongs' area is centred this far (in radii) ahead
+// of the plane.
+const ROAM_AHEAD = 0.4;
 // When an outcome ends the mission, its message shows this long first.
 const ENDING_MSECS = 4500;
 
@@ -103,6 +106,10 @@ export class Mission extends GameComponent {
   private kongOptions: TroopOptions = {};
   /** <patrolradius> in <startconditions>, else game.properties. */
   private patrolRadius: number | null = null;
+  /** <patrolradius>none</patrolradius>: no edge to the world. The kongs'
+   *  area (game.properties roam_radius) goes along with the plane, centred
+   *  a little ahead of it. */
+  private roaming = false;
   private tally = new Tally();
   /** An outcome has ended the mission: the status to take when the banner
    *  has shown for ENDING_MSECS. */
@@ -140,9 +147,10 @@ export class Mission extends GameComponent {
     }
     if (this.countdowntimer) this.hud.add(this.countdowntimer, TOP | RIGHT);
     const pos = this.player.entity.object.position;
-    this.patrol = { x: pos.x, z: pos.z, r: this.patrolRadius ?? (settings.getf('game', 'patrol_radius') || 3200) };
+    const radius = this.roaming ? settings.getf('game', 'roam_radius') || 2500 : this.patrolRadius;
+    this.patrol = { x: pos.x, z: pos.z, r: radius ?? (settings.getf('game', 'patrol_radius') || 3200) };
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
-    this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.patrol);
+    this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
     this.hud.add(this.radar, TOP | RIGHT);
     this.radar.position.x -= 0.015;
     this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
@@ -200,7 +208,11 @@ export class Mission extends GameComponent {
         healthMax: num('health_max'),
       };
     }
-    if (sc.patrolradius) this.patrolRadius = parseFloat(sc.patrolradius.textContent ?? '') || null;
+    if (sc.patrolradius) {
+      const t = (sc.patrolradius.textContent ?? '').trim();
+      if (t === 'none') this.roaming = true;
+      else this.patrolRadius = parseFloat(t) || null;
+    }
     this.player = await Player.create(model.name ?? '', model.skin ?? '', startHeight);
     if (sc.countdown) {
       const cd = xmlStringMap(sc.countdown);
@@ -255,8 +267,15 @@ export class Mission extends GameComponent {
     } else if (input) {
       const pos = this.player.entity.object.position;
       const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
-      const c = this.constraints ?? new Constraints();
-      this.player.read(input, c.minSpeed + input.throttle * (c.maxSpeed - c.minSpeed), c.minSpeed, safe);
+      const { min, max } = (this.constraints ?? new Constraints()).speeds(pos.y);
+      this.player.read(input, min + input.throttle * (max - min), min, safe);
+    }
+    if (this.roaming) {
+      const o = plane.object;
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(o.quaternion).setY(0);
+      if (fwd.lengthSq() > 1e-6) fwd.normalize();
+      this.patrol.x = o.position.x + fwd.x * this.patrol.r * ROAM_AHEAD;
+      this.patrol.z = o.position.z + fwd.z * this.patrol.r * ROAM_AHEAD;
     }
     const wasCrashed = plane.crashed;
     if (!wasCrashed) this.constraints?.restrict(this.player);
@@ -268,7 +287,7 @@ export class Mission extends GameComponent {
         ? `KONGS DOWNED ${gamestats.get(Stat.MONKEY_DEATHS)}`
         : `KONGS LEFT ${this.kongs.remaining()}`;
     }
-    if (!plane.crashed && !this.ending) this.checkBounds(msecs);
+    if (!plane.crashed && !this.ending && !this.roaming) this.checkBounds(msecs);
     if (plane.crashed && !wasCrashed) {
       // it just hit something
       this.lives--;

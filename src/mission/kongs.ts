@@ -144,6 +144,8 @@ export class Kong extends Entity {
     private material: THREE.MeshLambertMaterial,
     private cfg: KongConfig,
     private roar: AudioBuffer | null,
+    /** Its see-through silhouette (hidden once it's shot down). */
+    private ghost: THREE.Object3D | null = null,
   ) {
     const object = new THREE.Group();
     object.add(pose);
@@ -229,6 +231,7 @@ export class Kong extends Entity {
    *  topples over; in the street, away from the shot (going at `shot`). */
   private die(world: World, shot: THREE.Vector3): void {
     this.dying = true;
+    if (this.ghost) this.ghost.visible = false;
     this.tasks = [];
     gamestats.inc(Stat.MONKEY_DEATHS);
     this.bellow();
@@ -505,7 +508,6 @@ export interface Area { x: number; z: number; r: number }
 const SPAWN_NEAR = 700;
 const SPAWN_APART = 600;
 
-/** Keeps a few kongs roaming the patrol area. */
 /** A mission's say over its kongs (<kongs> in <startconditions>); anything
  *  left out comes from kong.properties. */
 export interface TroopOptions {
@@ -518,7 +520,25 @@ export interface TroopOptions {
   healthMax?: number;
 }
 
+// See-through silhouettes: kongs behind buildings show as a pale glow, so
+// they can be found from down among the streets.
+const SILHOUETTE_COLOR = 0xffb070;
+const SILHOUETTE_OPACITY = 0.55;
+// A kong this far from the middle of the area (in radii) has been left
+// behind (the area moves with the plane in Monkey Mayhem): it goes, and
+// another comes at once.
+const LEFT_BEHIND = 1.6;
+
+/** Keeps a few kongs roaming the patrol area. */
 export class KongTroop {
+  private silhouette = new THREE.MeshBasicMaterial({
+    color: SILHOUETTE_COLOR,
+    transparent: true,
+    opacity: SILHOUETTE_OPACITY,
+    depthFunc: THREE.GreaterDepth, // only where something is in front of it
+    depthWrite: false,
+    fog: false, // and through the haze
+  });
   private kongs: Kong[] = [];
   private respawn = 0;
   private started = false;
@@ -560,9 +580,14 @@ export class KongTroop {
     mesh.scale.setScalar(scale);
     mesh.rotation.y = Math.PI; // the model faces +Z; forward is -Z
     mesh.position.y = -box.min.y * scale; // feet on the ground
+    const ghost = new THREE.Mesh(geom, this.silhouette);
+    ghost.scale.copy(mesh.scale);
+    ghost.rotation.copy(mesh.rotation);
+    ghost.position.copy(mesh.position);
+    ghost.renderOrder = 1;
     const pose = new THREE.Group();
-    pose.add(mesh);
-    return new Kong(pose, material, this.cfg, this.roar);
+    pose.add(mesh, ghost);
+    return new Kong(pose, material, this.cfg, this.roar, ghost);
   }
 
   /** A crossing in the patrol area, not too near the plane and away from
@@ -602,7 +627,18 @@ export class KongTroop {
       this.started = true;
       for (let i = 0; i < this.count; i++) this.spawn(world, player);
     }
+    // left far behind: gone, and replaced straight away
+    const { x: ax, z: az, r } = this.area;
+    let replace = 0;
+    for (const k of this.kongs) {
+      const p = k.object.position;
+      if (!k.isDying() && Math.hypot(p.x - ax, p.z - az) > r * LEFT_BEHIND) {
+        k.dead = true;
+        replace++;
+      }
+    }
     this.kongs = this.kongs.filter((k) => !k.isDead());
+    for (let i = 0; i < replace; i++) this.spawn(world, player);
     const alive = this.living().length;
     if (!this.respawns) return;
     if (alive >= this.count) {

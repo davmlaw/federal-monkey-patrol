@@ -123,9 +123,27 @@ export class Outcomes {
   }
 }
 
+/** game.properties' speed range at `height` (above the street): the
+ *  plane's slowest and fastest, from *_low at speed_low_height and below
+ *  to *_high at speed_high_height and above, in proportion in between.
+ *  Low down it can creep along the streets; high up, where the city
+ *  below scrolls past slowly, it goes faster. */
+function altitudeSpeeds(height: number): { min: number; max: number } {
+  const g = (k: string, d: number): number => {
+    const v = settings.getf('game', k);
+    return Number.isFinite(v) ? v : d;
+  };
+  const lo = g('speed_low_height', 100);
+  const hi = g('speed_high_height', 2500);
+  const t = Math.max(0, Math.min(1, (height - lo) / Math.max(1, hi - lo)));
+  const at = (k: string, low: number, high: number): number => g(`${k}_low`, low) + t * (g(`${k}_high`, high) - g(`${k}_low`, low));
+  const min = at('min_speed', 80, 600);
+  return { min, max: Math.max(min, at('max_speed', 600, 1500)) };
+}
+
 /**
- * Limits on the player: the height is enforced here, the speed range is
- * what the throttle maps to (the plane never flies slower than minSpeed).
+ * Limits on the player: the height is enforced here; speeds() is what the
+ * throttle maps to (the plane never flies slower than its min).
  *
  * Note: the mission builder looks for <max_height>, <min_height>,
  * <max_speed> and <min_speed>, but the mission XML files say <maxheight>
@@ -134,13 +152,15 @@ export class Outcomes {
 export class Constraints {
   maxHeight = 10000;
   minHeight = 0;
-  /** game.properties' max_speed and min_speed, unless a mission says otherwise. */
-  maxSpeed: number;
-  minSpeed: number;
+  /** Fixed speeds from the mission; unset, they go by altitude. */
+  maxSpeed: number | null = null;
+  minSpeed: number | null = null;
 
-  constructor() {
-    this.maxSpeed = settings.getf('game', 'max_speed') || 1000;
-    this.minSpeed = Math.min(this.maxSpeed, settings.getf('game', 'min_speed') || 0);
+  /** The speed range at `height`. */
+  speeds(height: number): { min: number; max: number } {
+    const s = altitudeSpeeds(height);
+    const min = this.minSpeed ?? s.min;
+    return { min, max: Math.max(min, this.maxSpeed ?? s.max) };
   }
 
   restrict(player: Constrained): void {

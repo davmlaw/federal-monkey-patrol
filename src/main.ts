@@ -26,7 +26,7 @@ import { stage } from './game/stage.ts';
 type Group = 'mode' | 'story' | 'extra';
 const GAMES: { file: string; title: string; note: string; group: Group }[] = [
   { group: 'mode', file: 'clear.game', title: 'Clear the Area', note: 'Eight kongs in the patrol area and no more coming: shoot them all down' },
-  { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, kongs everywhere: down as many as you can' },
+  { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, no edge to the map, kongs everywhere: down as many as you can' },
   { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
   { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Film leader, intro and the four chapters (no missions in it yet)' },
   { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },

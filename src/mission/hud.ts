@@ -126,7 +126,8 @@ export class Radar extends Drawable2D {
   private clock = 0;
 
   /** `size`: across, in ortho units; `range`: world units to the rim. */
-  constructor(size: number, public range: number, public area: { x: number; z: number; r: number }) {
+  /** `area`: the patrol area, whose edge it draws (null: none). */
+  constructor(size: number, public range: number, public area: { x: number; z: number; r: number } | null) {
     super(size, size);
   }
 
@@ -165,8 +166,9 @@ export class Radar extends Drawable2D {
       if (run.length > 1) g.polyline(run, 0.002, edge);
       run = [];
     };
-    const n = 128;
+    const n = this.area ? 128 : -1;
     for (let i = 0; i <= n; i++) {
+      if (!this.area) break;
       const a = (i / n) * Math.PI * 2;
       const [px, py] = this.toRadar(this.area.x + Math.sin(a) * this.area.r, this.area.z + Math.cos(a) * this.area.r);
       if (Math.hypot(px, py) <= R) run.push([px, py]);
