@@ -3,9 +3,9 @@
 
 // NEXT: a tap or click on the game screen (moves story dialogue on).
 // QUIT (Esc) now opens the pause menu rather than quitting straight away.
-export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, MODE: 4, NEXT: 5 } as const;
+export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, NEXT: 4 } as const;
 export type Button = (typeof Button)[keyof typeof Button];
-const NUM_BUTTONS = 6;
+const NUM_BUTTONS = 5;
 
 // Starting throttle: halfway between game.properties' min and max speeds
 // (which go by altitude).
@@ -63,8 +63,6 @@ const KEYS: Partial<Record<string, Button>> = {
   Escape: Button.QUIT,
   Insert: Button.TUNER,
   Backquote: Button.TUNER,
-  KeyM: Button.MODE,
-  Tab: Button.MODE,
 };
 
 class Keyboard implements InputDevice {
@@ -111,10 +109,10 @@ class Keyboard implements InputDevice {
   }
 }
 
-// Gamepad: axis 0/1 with a dead zone, buttons 0/1 fire, 3 switches flying
-// mode, 8 the tuner; the triggers (6/7) move the throttle.
+// Gamepad: axis 0/1 with a dead zone, buttons 0/1 fire, 8 the tuner; the
+// triggers (6/7) move the throttle.
 const TOLERANCE = 0.1;
-const PAD_BUTTONS: Record<number, Button> = { 0: Button.FIRE1, 1: Button.FIRE2, 3: Button.MODE, 8: Button.TUNER };
+const PAD_BUTTONS: Record<number, Button> = { 0: Button.FIRE1, 1: Button.FIRE2, 8: Button.TUNER };
 
 class Joystick implements InputDevice {
   private axis: Axis = { x: 0, y: 0 };

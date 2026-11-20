@@ -1,5 +1,5 @@
-// On-screen flight controls: a stick, a throttle
-// lever, a fire button and a button to switch flying mode. (The pause /
+// On-screen flight controls: a stick, a throttle lever (not in top-down
+// missions, which have none) and a fire button. (The pause /
 // main menu button is in main.ts, since it shows in the story too.) They work
 // with touch, pen or mouse, and act as one more InputManager device, so they
 // fill the same Input struct as the keyboard and gamepad.
@@ -12,7 +12,6 @@ const HTML = `
     <div class="tc-track"><div class="tc-fill"></div><div class="tc-handle"></div></div>
     <span class="tc-label">THR</span>
   </div>
-  <button class="tc-mode" type="button">FOLLOW</button>
   <button class="tc-fire" type="button">FIRE</button>
 `;
 
@@ -33,7 +32,7 @@ export class TouchControls implements InputDevice {
   private track: HTMLElement;
   private fill: HTMLElement;
   private handle: HTMLElement;
-  private modeBtn: HTMLButtonElement;
+  private throttle: HTMLElement;
 
   constructor(private input: Input) {
     this.el = document.createElement('div');
@@ -48,12 +47,11 @@ export class TouchControls implements InputDevice {
     this.track = find(this.el, '.tc-track');
     this.fill = find(this.el, '.tc-fill');
     this.handle = find(this.el, '.tc-handle');
-    this.modeBtn = find(this.el, '.tc-mode');
+    this.throttle = find(this.el, '.tc-throttle');
 
     this.drag(this.stick, (e) => this.moveStick(e), () => this.centreStick());
     this.drag(this.track, (e) => this.moveThrottle(e));
     this.hold(find(this.el, '.tc-fire'), Button.FIRE1);
-    this.hold(this.modeBtn, Button.MODE);
   }
 
   /** Pointer drag on `el`, captured so it keeps tracking outside it. */
@@ -150,8 +148,9 @@ export class TouchControls implements InputDevice {
     if (!v) this.centreStick();
   }
 
-  setMode(label: string): void {
-    if (this.modeBtn.textContent !== label) this.modeBtn.textContent = label;
+  showThrottle(v: boolean): void {
+    if (this.throttle.hidden === !v) return;
+    this.throttle.hidden = !v;
   }
 
   dispose(): void { this.el.remove(); }

@@ -110,6 +110,7 @@ const TURN_RATE = 2.2; // radians per second
 const TURN_IN_PLACE = 0.7; // turns on the spot when facing further off than this
 const FLASH_MSECS = 150; // glows when hit
 const ROOF_MSECS: [number, number] = [5000, 10000];
+const PERCH_MSECS: [number, number] = [1500, 5000]; // a rooftop kong, between turns
 const GRAVITY = 400; // units/s^2, for falling off buildings
 const TOPPLE_MSECS = 1400; // falling over in the street
 const CORPSE_MSECS = 12000; // lies there this long...
@@ -138,14 +139,14 @@ export class Kong extends Entity {
   ear: THREE.Object3D | null = null;
   /** The patrol area: it heads back in when it strays outside. */
   home: Area | null = null;
+  /** Lives on a roof: turns about and roars, never walks off. */
+  perched = false;
 
   constructor(
     private pose: THREE.Group, // waddles and topples, pivoting at the feet
     private material: THREE.MeshLambertMaterial,
     private cfg: KongConfig,
     private roar: AudioBuffer | null,
-    /** Its see-through silhouette (hidden once it's shot down). */
-    private ghost: THREE.Object3D | null = null,
   ) {
     const object = new THREE.Group();
     object.add(pose);
@@ -156,9 +157,9 @@ export class Kong extends Entity {
 
   get height(): number { return this.cfg.height; }
 
-  /** Stand at (x, z), heading `yaw`, with nothing to do. */
-  placeAt(x: number, z: number, yaw = Math.floor(Math.random() * 4) * Math.PI / 2): void {
-    this.object.position.set(x, 0, z);
+  /** Stand at (x, y, z), heading `yaw`, with nothing to do. */
+  placeAt(x: number, z: number, yaw = Math.floor(Math.random() * 4) * Math.PI / 2, y = 0): void {
+    this.object.position.set(x, y, z);
     this.yaw = yaw;
     this.object.rotation.set(0, yaw, 0);
     this.tasks = [];
@@ -231,7 +232,6 @@ export class Kong extends Entity {
    *  topples over; in the street, away from the shot (going at `shot`). */
   private die(world: World, shot: THREE.Vector3): void {
     this.dying = true;
-    if (this.ghost) this.ghost.visible = false;
     this.tasks = [];
     gamestats.inc(Stat.MONKEY_DEATHS);
     this.bellow();
@@ -403,6 +403,13 @@ export class Kong extends Entity {
   /** At a crossing with nothing to do: maybe climb a building on one of
    *  its corners, otherwise walk on along one of the streets. */
   private plan(world: World): void {
+    if (this.perched) {
+      this.tasks.push(
+        { kind: 'turn', yaw: this.yaw + rand(-2, 2) },
+        { kind: 'wait', msecs: rand(...PERCH_MSECS), roar: Math.random() < 0.3 },
+      );
+      return;
+    }
     const pos = this.object.position;
     const x = Math.round(pos.x / BLOCKSIZE) * BLOCKSIZE;
     const z = Math.round(pos.z / BLOCKSIZE) * BLOCKSIZE;
@@ -507,6 +514,9 @@ export interface Area { x: number; z: number; r: number }
 // plane, and apart from each other.
 const SPAWN_NEAR = 700;
 const SPAWN_APART = 600;
+// Rooftop kongs stand on roofs at least this high (not on lobbies and
+// storefronts).
+const ROOF_MIN = 40;
 
 /** A mission's say over its kongs (<kongs> in <startconditions>); anything
  *  left out comes from kong.properties. */
@@ -518,12 +528,10 @@ export interface TroopOptions {
   respawnMsecs?: number | null;
   healthMin?: number;
   healthMax?: number;
+  /** All of them up on the roofs, staying there. */
+  rooftops?: boolean;
 }
 
-// See-through silhouettes: kongs behind buildings show as a pale glow, so
-// they can be found from down among the streets.
-const SILHOUETTE_COLOR = 0xffb070;
-const SILHOUETTE_OPACITY = 0.55;
 // A kong this far from the middle of the area (in radii) has been left
 // behind (the area moves with the plane in Monkey Mayhem): it goes, and
 // another comes at once.
@@ -531,19 +539,12 @@ const LEFT_BEHIND = 1.6;
 
 /** Keeps a few kongs roaming the patrol area. */
 export class KongTroop {
-  private silhouette = new THREE.MeshBasicMaterial({
-    color: SILHOUETTE_COLOR,
-    transparent: true,
-    opacity: SILHOUETTE_OPACITY,
-    depthFunc: THREE.GreaterDepth, // only where something is in front of it
-    depthWrite: false,
-    fog: false, // and through the haze
-  });
   private kongs: Kong[] = [];
   private respawn = 0;
   private started = false;
   /** No more come once these are down. */
   readonly respawns: boolean;
+  readonly rooftops: boolean;
   public count: number;
 
   private constructor(
@@ -555,6 +556,7 @@ export class KongTroop {
   ) {
     this.count = opts.count ?? cfg.count;
     this.respawns = opts.respawnMsecs !== null;
+    this.rooftops = !!opts.rooftops;
     if (opts.respawnMsecs != null) cfg.respawnMsecs = opts.respawnMsecs;
     if (opts.healthMin != null) cfg.healthMin = opts.healthMin;
     if (opts.healthMax != null) cfg.healthMax = Math.max(cfg.healthMin, opts.healthMax);
@@ -580,14 +582,9 @@ export class KongTroop {
     mesh.scale.setScalar(scale);
     mesh.rotation.y = Math.PI; // the model faces +Z; forward is -Z
     mesh.position.y = -box.min.y * scale; // feet on the ground
-    const ghost = new THREE.Mesh(geom, this.silhouette);
-    ghost.scale.copy(mesh.scale);
-    ghost.rotation.copy(mesh.rotation);
-    ghost.position.copy(mesh.position);
-    ghost.renderOrder = 1;
     const pose = new THREE.Group();
-    pose.add(mesh, ghost);
-    return new Kong(pose, material, this.cfg, this.roar, ghost);
+    pose.add(mesh);
+    return new Kong(pose, material, this.cfg, this.roar);
   }
 
   /** A crossing in the patrol area, not too near the plane and away from
@@ -613,11 +610,50 @@ export class KongTroop {
     return best;
   }
 
+  /** Somewhere flat on a roof in the patrol area, not too near the plane
+   *  and away from other kongs: (x, roof height, z), or null. */
+  private roofPoint(world: World, player: THREE.Object3D): [number, number, number] | null {
+    const { x: ax, z: az, r } = this.area;
+    const h = this.cfg.height;
+    const roofAt = (x: number, z: number): number | null => {
+      const hit = world.grid.sweep(new THREE.Vector3(x, 5000, z), new THREE.Vector3(x, -10, z), 0);
+      return hit && hit.normal.y > 0.9 ? hit.point.y : null;
+    };
+    let best: [number, number, number] | null = null;
+    let bestScore = -1;
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.sqrt(Math.random()) * r * 0.8;
+      const x = ax + Math.sin(a) * d;
+      const z = az + Math.cos(a) * d;
+      const y = roofAt(x, z);
+      if (y === null || y < ROOF_MIN || y > this.cfg.climbMax) continue;
+      // room to stand: the same roof all round
+      const e = 0.25 * h;
+      if (![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
+      let apart = Infinity;
+      for (const k of this.kongs) apart = Math.min(apart, Math.hypot(k.object.position.x - x, k.object.position.z - z));
+      const score = Math.min(apart / SPAWN_APART, Math.hypot(player.position.x - x, player.position.z - z) / SPAWN_NEAR);
+      if (score > bestScore) {
+        best = [x, y, z];
+        bestScore = score;
+      }
+      if (score >= 1) break;
+    }
+    return best;
+  }
+
   private spawn(world: World, player: THREE.Object3D): void {
     const kong = this.make();
     kong.ear = player;
     kong.home = this.area;
-    kong.placeAt(...this.spawnPoint(player));
+    const roof = this.rooftops ? this.roofPoint(world, player) : null;
+    if (roof) {
+      kong.placeAt(roof[0], roof[2], Math.random() * Math.PI * 2, roof[1]);
+      kong.perched = true;
+    } else {
+      kong.placeAt(...this.spawnPoint(player));
+    }
     this.kongs.push(kong);
     world.addEntity(kong);
   }

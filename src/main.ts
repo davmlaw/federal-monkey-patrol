@@ -18,6 +18,7 @@ import { gamestats } from './mission/stats.ts';
 import { Tuner } from './tuner.ts';
 import { TouchControls } from './core/touch.ts';
 import { lastResult, Mission } from './mission/mission.ts';
+import { FlyMode } from './mission/world.ts';
 import { StoryTeller } from './game/storyteller.ts';
 import { stage } from './game/stage.ts';
 
@@ -27,6 +28,8 @@ type Group = 'mode' | 'story' | 'extra';
 const GAMES: { file: string; title: string; note: string; group: Group }[] = [
   { group: 'mode', file: 'clear.game', title: 'Clear the Area', note: 'Eight kongs in the patrol area and no more coming: shoot them all down' },
   { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, no edge to the map, kongs everywhere: down as many as you can' },
+  { group: 'mode', file: 'rooftops.game', title: 'Rooftops', note: 'Top-down, 1942 style: kongs on every roof, the plane heads up the screen and slides side to side' },
+  { group: 'mode', file: 'rooftops_steer.game', title: 'Rooftops: Steering', note: 'Top-down with kongs on every roof; left and right turn the plane' },
   { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
   { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Film leader, intro and the four chapters (no missions in it yet)' },
   { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
@@ -137,7 +140,7 @@ function showMenu({ ended = false } = {}): void {
       <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
       <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}</p>
       <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
-        M or Tab: switch flying mode (in top-down mode, bullets find kongs at any height) &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
+        In the top-down modes up and down change speed, and bullets find kongs at any height &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
         In the story, tap, click, Space or Enter for the next line.
         On a touch screen, use the on-screen stick, throttle and buttons.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
@@ -206,7 +209,7 @@ async function start(file: string | null): Promise<void> {
       // on-screen flight controls only while flying a mission
       const player = c instanceof Mission && c.loaded && !c.loadError ? c.player : null;
       tc.setVisible(!!player && !paused && !tuner?.visible);
-      if (player) tc.setMode(player.modeName());
+      if (player) tc.showThrottle(player.mode === FlyMode.FOLLOW);
       stage.endFrame();
       pauseBtn.hidden = paused;
       skipLink.hidden = paused || !hasStory || c instanceof Mission;

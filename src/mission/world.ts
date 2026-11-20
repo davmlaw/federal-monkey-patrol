@@ -438,7 +438,13 @@ export class FollowPlaneFilter extends InputFilter implements Controller {
 // Top-down mode: how fast the stick moves the plane across the screen.
 const STRAFE_SPEED = 400;
 const STRAFE_RESPONSE = 10; // 1/s
-// Switching to top-down pulls the plane up above the rooftops: it climbs
+// 1942 controls: how far the plane leans off the middle of the screen while
+// the stick is held (world units at the plane's height, right and ahead).
+const SCREEN_X = 45;
+const SCREEN_Y = 30;
+// Steering controls: degrees per second at full stick.
+const STEER_RATE = 90;
+// Top-down mode keeps the plane up above the rooftops: it climbs
 // (never dives) towards `safeHeight`, easing in, nose up while it climbs.
 const CLIMB_RATE = 450; // units per second, at most
 const CLIMB_EASE = 1.5; // 1/s: climb speed per unit of height still to go
@@ -448,29 +454,47 @@ const BANK_DEGREES = 25;
 
 /**
  * TopDownPlaneFilter ("above the skyscrapers", like 1942 in game.txt): the
- * plane levels out and keeps its heading; the stick moves it left/right and
- * speeds it up or slows it down. The 2006 filter only accumulated velocity
- * and was never switched on, so this is a new take on it.
+ * plane flies level over the roofs at `speed` (no throttle: up/down on the
+ * stick speeds it up to twice as far above the minimum, or slows it to the
+ * minimum). With 1942 controls it keeps its heading and left/right moves
+ * it sideways, the plane leaning off the middle of the screen the way the
+ * stick is held (`screen`); with `steer`, left/right turns it. The 2006
+ * filter only accumulated velocity and was never switched on, so this is a
+ * new take on it.
  */
 export class TopDownPlaneFilter extends FollowPlaneFilter {
   strafe: Axis = { x: 0, y: 0 };
   safeHeight = 0; // set each frame by the mission
+  /** Left/right turns the plane, rather than moving it sideways. */
+  steer = false;
+  /** 1942 controls: where the plane sits on screen (world units right of
+   *  and ahead of the camera's centre, at the plane's height). */
+  screen: Axis = { x: 0, y: 0 };
 
   override reset(): void {
     super.reset();
     this.strafe = { x: 0, y: 0 };
+    this.screen = { x: 0, y: 0 };
   }
 
   override control(ent: Entity, msecs: number): void {
     const q = ent.object.quaternion;
-    const { yaw } = yawPitch(q);
+    let { yaw } = yawPitch(q);
+    const stick = (v: number): number => Math.max(-1, Math.min(1, v));
+    if (this.steer) {
+      this.yawRate += (-stick(this.axis.x) * STEER_RATE - this.yawRate) * damp(STICK_RESPONSE, msecs);
+      yaw += this.yawRate * msecs / 1000 * deg2rad;
+    } else {
+      this.yawRate = 0;
+    }
+    this.pitchRate = 0;
     q.slerp(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ')), damp(LEVEL_RATE, msecs));
     const k = damp(STRAFE_RESPONSE, msecs);
-    this.strafe.x += (this.axis.x - this.strafe.x) * k;
-    this.strafe.y += (this.axis.y - this.strafe.y) * k;
-    this.yawRate = 0;
-    this.pitchRate = 0;
-    this.bank(ent, -this.strafe.x * BANK_DEGREES, msecs);
+    this.strafe.x += (stick(this.axis.x) - this.strafe.x) * k;
+    this.strafe.y += (stick(this.axis.y) - this.strafe.y) * k;
+    const side = this.steer ? 0 : this.strafe.x;
+    this.screen = { x: side * SCREEN_X, y: this.steer ? 0 : this.strafe.y * SCREEN_Y };
+    this.bank(ent, this.steer ? this.yawRate * BANK_PER_YAW : -side * BANK_DEGREES, msecs);
     // velocity is in the plane's own frame; use the level frame so any
     // leftover pitch doesn't push it up or down
     const climb = Math.min(CLIMB_RATE, Math.max(0, (this.safeHeight - ent.object.position.y) * CLIMB_EASE));
@@ -478,8 +502,8 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
       const x = ent.bank.rotation.x;
       ent.bank.rotation.x = x + (climb * CLIMB_NOSE_UP * deg2rad - x) * damp(BANK_RESPONSE, msecs);
     }
-    const forward = Math.max(this.minSpeed, this.speed + this.strafe.y * STRAFE_SPEED / 2);
-    const v = new THREE.Vector3(this.strafe.x * STRAFE_SPEED, 0, -forward);
+    const forward = Math.max(this.minSpeed, this.speed + this.strafe.y * Math.max(0, this.speed - this.minSpeed));
+    const v = new THREE.Vector3(side * STRAFE_SPEED, 0, -forward);
     v.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
     v.y = climb;
     v.applyQuaternion(q.clone().invert());
@@ -488,15 +512,15 @@ export class TopDownPlaneFilter extends FollowPlaneFilter {
   }
 }
 
+/** How a mission flies: chasing the plane, or looking down on it (a game
+ *  mode of its own; there's no switching between them). */
 export const FlyMode = { FOLLOW: 0, TOPDOWN: 1 } as const;
 export type FlyMode = (typeof FlyMode)[keyof typeof FlyMode];
-const MODE_NAMES = ['FOLLOW', 'TOP-DOWN'];
 
 /** Owns the plane and its two controllers. */
 export class Player {
   readonly controllers: [FollowPlaneFilter, TopDownPlaneFilter] = [new FollowPlaneFilter(), new TopDownPlaneFilter()];
   mode: FlyMode = FlyMode.FOLLOW;
-  private lastModeToggle: boolean | null = null;
 
   private constructor(public entity: Plane) {}
 
@@ -527,7 +551,11 @@ export class Player {
     this.entity.flatShots = m === FlyMode.TOPDOWN;
   }
 
-  modeName(): string { return MODE_NAMES[this.mode]; }
+  /** Where the plane sits on screen, off the camera's centre (top-down
+   *  mode's 1942 controls; see TopDownPlaneFilter.screen). */
+  screenOffset(): Axis {
+    return this.mode === FlyMode.TOPDOWN ? this.controllers[FlyMode.TOPDOWN].screen : { x: 0, y: 0 };
+  }
 
   /** Put the wreck back together at `height`, level, on its old heading,
    *  and safe from collisions for `invulnerable` milliseconds. */
@@ -558,11 +586,6 @@ export class Player {
    *  whose bottom is minSpeed; safeHeight: the height top-down mode climbs
    *  to (clear of the roofs). */
   read(input: Input, speed: number, minSpeed: number, safeHeight = 0): void {
-    const t = input.buttonToggled(Button.MODE);
-    if (this.lastModeToggle !== null && t !== this.lastModeToggle) {
-      this.setMode(this.mode === FlyMode.FOLLOW ? FlyMode.TOPDOWN : FlyMode.FOLLOW);
-    }
-    this.lastModeToggle = t;
     for (const c of this.controllers) {
       c.speed = speed;
       c.minSpeed = minSpeed;
@@ -613,7 +636,9 @@ export class CameraMan {
 
   constructor(private camera: ChaseCamera) {}
 
-  lookAt(object: THREE.Object3D, mode: FlyMode = FlyMode.FOLLOW, msecs = 0): void {
+  /** `offset`: where the plane sits on screen in top-down mode (world units
+   *  right of and ahead of the middle). */
+  lookAt(object: THREE.Object3D, mode: FlyMode = FlyMode.FOLLOW, msecs = 0, offset: Axis = { x: 0, y: 0 }): void {
     const goal = mode === FlyMode.TOPDOWN ? 1 : 0;
     const step = CAMERA_BLEND_RATE * msecs / 1000;
     this.topdown += Math.max(-step, Math.min(step, goal - this.topdown));
@@ -621,6 +646,7 @@ export class CameraMan {
 
     const { yaw, pitch } = yawPitch(object.quaternion);
     if (this.yaw === null) {
+      this.topdown = goal; // (no blend into the first frame)
       this.yaw = yaw;
       this.pitch = pitch * FOLLOW_PITCH;
     } else {
@@ -635,8 +661,10 @@ export class CameraMan {
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(frame);
     if (b > 0) {
       const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      position.lerp(object.position.clone().add(new THREE.Vector3(0, TOPDOWN_HEIGHT, 0)), b);
-      target.lerp(object.position.clone().addScaledVector(fwd, 0.01), b);
+      const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+      const centre = object.position.clone().addScaledVector(right, -offset.x).addScaledVector(fwd, -offset.y);
+      position.lerp(centre.clone().add(new THREE.Vector3(0, TOPDOWN_HEIGHT, 0)), b);
+      target.lerp(centre.addScaledVector(fwd, 0.01), b);
       up.lerp(fwd, b).normalize();
     }
     this.camera.set(position, target, up);

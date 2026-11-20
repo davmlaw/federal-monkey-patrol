@@ -10,7 +10,7 @@ import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
-import { makeCameraMan, Player, World, type CameraMan } from './world.ts';
+import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
 import { Banner, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar, Radar, Tally, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
@@ -95,7 +95,13 @@ export class Mission extends GameComponent {
   private outside = 0;
   /** Outside, but heading back in. */
   private heading = false;
-  private radar!: Radar;
+  /** None with <radar>off</radar>. */
+  private radar: Radar | null = null;
+  private showRadar = true;
+  /** <view>topdown</view>: a top-down mission (no throttle), with
+   *  <controls>steer</controls> to turn rather than slide sideways. */
+  private flyMode: FlyMode = FlyMode.FOLLOW;
+  private steer = false;
   private turnBack = new TurnBack();
   private outMessage = new Text2D('Out of bounds: you lost a plane', 0.25);
   private outMessageMsecs = 0;
@@ -150,10 +156,12 @@ export class Mission extends GameComponent {
     const radius = this.roaming ? settings.getf('game', 'roam_radius') || 2500 : this.patrolRadius;
     this.patrol = { x: pos.x, z: pos.z, r: radius ?? (settings.getf('game', 'patrol_radius') || 3200) };
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
-    this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
-    this.hud.add(this.radar, TOP | RIGHT);
-    this.radar.position.x -= 0.015;
-    this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
+    if (this.showRadar) {
+      this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
+      this.hud.add(this.radar, TOP | RIGHT);
+      this.radar.position.x -= 0.015;
+      this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
+    }
     this.outMessage.setColor(1, 0.85, 0.3);
     this.outMessage.position.y = 0.1;
     this.hud.add(this.tally, TOP);
@@ -193,8 +201,9 @@ export class Mission extends GameComponent {
       if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
       if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
     }
-    // <kongs respawn_msecs="N" health_min="N" health_max="N">count</kongs>,
-    // with respawn_msecs="never" for a fixed number to clear
+    // <kongs respawn_msecs="N" health_min="N" health_max="N" on="rooftops">count</kongs>,
+    // with respawn_msecs="never" for a fixed number to clear, and
+    // on="rooftops" to have them all up on the roofs
     if (sc.kongs) {
       const k = sc.kongs;
       const num = (name: string): number | undefined => {
@@ -204,6 +213,7 @@ export class Mission extends GameComponent {
       this.kongOptions = {
         count: parseInt(k.textContent ?? '', 10) || 0,
         respawnMsecs: k.getAttribute('respawn_msecs') === 'never' ? null : num('respawn_msecs'),
+        rooftops: k.getAttribute('on') === 'rooftops',
         healthMin: num('health_min'),
         healthMax: num('health_max'),
       };
@@ -214,6 +224,12 @@ export class Mission extends GameComponent {
       else this.patrolRadius = parseFloat(t) || null;
     }
     this.player = await Player.create(model.name ?? '', model.skin ?? '', startHeight);
+    const text = (e: Element | undefined): string => (e?.textContent ?? '').trim().toLowerCase();
+    if (text(sc.view) === 'topdown') this.flyMode = FlyMode.TOPDOWN;
+    this.steer = text(sc.controls) === 'steer';
+    this.showRadar = text(sc.radar) !== 'off';
+    this.player.controllers[FlyMode.TOPDOWN].steer = this.steer;
+    this.player.setMode(this.flyMode);
     if (sc.countdown) {
       const cd = xmlStringMap(sc.countdown);
       this.countdowntimer = new CountDownTimer(parseInt(cd.seconds ?? '', 10) || 0, cd.label ?? '');
@@ -268,7 +284,9 @@ export class Mission extends GameComponent {
       const pos = this.player.entity.object.position;
       const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE;
       const { min, max } = (this.constraints ?? new Constraints()).speeds(pos.y);
-      this.player.read(input, min + input.throttle * (max - min), min, safe);
+      // (top-down missions have no throttle: they cruise halfway)
+      const throttle = this.flyMode === FlyMode.TOPDOWN ? 0.5 : input.throttle;
+      this.player.read(input, min + throttle * (max - min), min, safe);
     }
     if (this.roaming) {
       const o = plane.object;
@@ -349,7 +367,7 @@ export class Mission extends GameComponent {
   private draw(display: Display, msecs: number): void {
     display.draw2d(this.fogplane);
     display.clearDepth();
-    this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs);
+    this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs, this.player.screenOffset());
     this.world!.draw(display, this.cameraman.getCamera());
     this.updateRadar(msecs);
     display.draw2d(this.hud);
@@ -367,6 +385,7 @@ export class Mission extends GameComponent {
   }
 
   private updateRadar(msecs: number): void {
+    if (!this.radar) return;
     const o = this.player.entity.object;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(o.quaternion);
     this.radar.plane = { x: o.position.x, z: o.position.z, yaw: Math.atan2(-fwd.x, -fwd.z) };
