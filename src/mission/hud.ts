@@ -107,7 +107,9 @@ export class LivesDisplay extends Drawable2D {
 }
 
 /** Something to show on the radar, in world coordinates. */
-export interface Blip { x: number; z: number }
+/** A dot on the radar: a kong, or (`blonde`) one carrying a blonde, or
+ *  a blonde falling. */
+export interface Blip { x: number; z: number; kind?: 'kong' | 'carrying' | 'blonde' }
 
 const RADAR_SEGMENTS = 48;
 
@@ -188,7 +190,16 @@ export class Radar extends Drawable2D {
       }
       g.push();
       g.translate(px, py);
-      g.quad(dot * 2, dot * 2, far ? [0.95, 0.55, 0.3, 0.7 * alpha] : [1, 0.4, 0.25, alpha]);
+      if (b.kind === 'blonde') {
+        // a falling blonde: a bright diamond, blinking
+        if (blink || far) {
+          g.rotate(45);
+          g.quad(dot * 2.2, dot * 2.2, [1, 0.95, 0.55, alpha]);
+        }
+      } else {
+        g.quad(dot * 2, dot * 2, far ? [0.95, 0.55, 0.3, 0.7 * alpha] : [1, 0.4, 0.25, alpha]);
+        if (b.kind === 'carrying') g.quad(dot, dot, [1, 0.95, 0.55, alpha]);
+      }
       g.pop();
     }
     // the plane, pointing up

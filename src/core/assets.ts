@@ -218,3 +218,58 @@ export function playBang(seconds = 1.8, cutoff = 1200, volume = 0.9): void {
   src.connect(filter).connect(gain).connect(ctx.destination);
   src.start();
 }
+
+/** A synthesised scream (a blonde's): a wavering high wail, rising and
+ *  falling, through a vocal-ish band-pass. */
+export function playScream(volume = 0.5): void {
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  const len = 1.1 + Math.random() * 0.4;
+  const pitch = 0.9 + Math.random() * 0.25;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(700 * pitch, t0);
+  osc.frequency.exponentialRampToValueAtTime(1250 * pitch, t0 + 0.15);
+  osc.frequency.exponentialRampToValueAtTime(1100 * pitch, t0 + len * 0.7);
+  osc.frequency.exponentialRampToValueAtTime(650 * pitch, t0 + len);
+  // vibrato
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 7.5;
+  const depth = ctx.createGain();
+  depth.gain.value = 45 * pitch;
+  lfo.connect(depth).connect(osc.frequency);
+  const band = ctx.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = 1900;
+  band.Q.value = 1.2;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(volume, t0 + 0.06);
+  gain.gain.setValueAtTime(volume, t0 + len * 0.75);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
+  osc.connect(band).connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  lfo.start(t0);
+  osc.stop(t0 + len);
+  lfo.stop(t0 + len);
+}
+
+/** A synthesised two-note chime (a blonde caught). */
+export function playChime(volume = 0.35): void {
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  [[784, 0], [1175, 0.11], [1568, 0.22]].forEach(([f, at]) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = f;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0 + at);
+    gain.gain.exponentialRampToValueAtTime(volume, t0 + at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.5);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0 + at);
+    osc.stop(t0 + at + 0.55);
+  });
+}

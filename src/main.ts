@@ -138,9 +138,11 @@ function showMenu({ ended = false } = {}): void {
       <ul class="games">${group('mode').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
       <h2>Story</h2>
       <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
-      <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}</p>
+      <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}
+        &middot; <a href="kongtest.html">Kong &amp; blonde animations</a></p>
       <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
         In the top-down modes up and down change speed, and bullets find kongs at any height &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
+        Kongs carry blondes up the skyscrapers: shoot the kong, then fly through her as she falls to catch her.
         In the story, tap, click, Space or Enter for the next line.
         On a touch screen, use the on-screen stick, throttle and buttons.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.

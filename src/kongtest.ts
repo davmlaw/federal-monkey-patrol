@@ -1,21 +1,24 @@
-// Test page for the kong's animations (kongtest.html): the rigged model
-// going through its clips, on a ground that moves under it as it walks and
-// a wall that slides down as it climbs, so slipping feet and hands show.
-// lil-gui picks the clip and shows the skeleton or the skin weights.
+// Test page for the kong's and the blonde's animations (kongtest.html): the
+// rigged model going through its clips, on a ground that moves under it as
+// it walks and a wall that slides down as it climbs, so slipping feet and
+// hands show. lil-gui picks the model and clip, has the kong carry a
+// blonde, and shows the skeleton or the skin weights.
 //
-// URL parameters: clip=walk, phase=0.25, paused=1, view=side|front|back|
-// three|top, weights=all|<bone>, skeleton=1, and sheet=<clip> for a contact
-// sheet of one cycle (frames=8, views=side,front, tile=260, sign=-1 to fall
-// on its face) instead of the live view.
+// URL parameters: model=kong|blonde, clip=walk, carry=1, phase=0.25,
+// paused=1, view=side|front|back|three|top, weights=all|<bone>,
+// skeleton=1, and sheet=<clip> for a contact sheet of one cycle (frames=8,
+// views=side,front, tile=260, sign=-1 to fall on its face, zoom=3) instead of the
+// live view. The blonde's phase is in seconds (a sheet covers 2).
 
 import * as THREE from 'three';
 import GUI from 'lil-gui';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { loadModel } from './core/assets.ts';
 import {
-  CLIMB_STRIDE, CLIPS, FALL_SETTLE, GROUND_Y, KongAnimator, KongRig, ROAR_SECONDS, IDLE_SECONDS, WALK_STRIDE,
+  CLIMB_STRIDE, CLIPS, FALL_SETTLE, GRAB_GOT, GROUND_Y, KongAnimator, KongRig, RigAnimator, ROAR_SECONDS, IDLE_SECONDS, WALK_STRIDE,
   type KongClip,
 } from './mission/kongrig.ts';
+import { BLONDE_CLIPS, BLONDE_GROUND_Y, BLONDE_WAIST_Y, BlondeRig, type BlondeClip } from './mission/blonde.ts';
 
 const params = new URLSearchParams(location.search);
 const TILE = 500; // the checks on the ground and wall
@@ -92,6 +95,25 @@ async function main(): Promise<void> {
   scene.add(pose);
   wall.position.z = rig.wallZ;
 
+  // the blonde: in the kong's fist (to scale: 15 to its 90), or on her own
+  // (as tall as the kong, to see her better)
+  const blondeProto = await loadModel('blonde.obj', 'blondecolor2.jpg');
+  const MODEL_KONG = 3318;
+  const BLONDE_TALL = 3550;
+  const held = new BlondeRig(blondeProto.geometry, blondeProto.material);
+  const heldAnim = new RigAnimator<BlondeClip>(held, 'held');
+  held.mesh.scale.setScalar((15 / HEIGHT) * MODEL_KONG / BLONDE_TALL);
+  held.mesh.position.y = -BLONDE_WAIST_Y * held.mesh.scale.y;
+  const heldGroup = new THREE.Group();
+  heldGroup.add(held.mesh);
+  scene.add(heldGroup);
+  const solo = new BlondeRig(blondeProto.geometry.clone(), blondeProto.material);
+  const soloAnim = new RigAnimator<BlondeClip>(solo, 'stand');
+  const soloScale = (GROUND_Y * -2) / BLONDE_TALL * 0.95;
+  solo.mesh.scale.setScalar(soloScale);
+  solo.mesh.position.y = GROUND_Y - BLONDE_GROUND_Y * soloScale;
+  scene.add(solo.mesh);
+
   const skel = new THREE.SkeletonHelper(rig.mesh);
   (skel.material as THREE.LineBasicMaterial).depthTest = false;
   (skel.material as THREE.LineBasicMaterial).linewidth = 2;
@@ -121,7 +143,10 @@ async function main(): Promise<void> {
   }
 
   const state = {
-    clip: (params.get('clip') ?? 'walk') as KongClip,
+    model: params.get('model') === 'blonde' ? 'blonde' : 'kong',
+    carry: params.has('carry'),
+    blondeClip: (params.get('model') === 'blonde' ? params.get('clip') ?? 'held' : 'held') as BlondeClip,
+    clip: (params.get('model') !== 'blonde' ? params.get('clip') ?? 'walk' : 'walk') as KongClip,
     speed: 1,
     paused: params.has('paused'),
     phase: parseFloat(params.get('phase') ?? '0'),
@@ -138,8 +163,31 @@ async function main(): Promise<void> {
   /** Everything for `clip` at `phase`, straight from the rig (no blending). */
   function poseAt(clip: KongClip, phase: number): void {
     rig.fallSign = state.fallSign;
+    rig.carry = state.carry;
     rig.apply(clip, phase);
     placeScenery(clip, phase);
+    placeHeld(clip, phase, phase * 4);
+  }
+
+  /** The blonde in the kong's fist, struggling (`secs` into it). */
+  function placeHeld(clip: KongClip, phase: number, secs: number): void {
+    heldGroup.visible = state.model === 'kong' && state.carry && clip !== 'fall' && clip !== 'bind'
+      && (clip !== 'grab' || phase >= GRAB_GOT);
+    if (!heldGroup.visible) return;
+    held.apply('held', secs);
+    pose.updateMatrixWorld(true);
+    rig.tip('hand.R', 0.45, heldGroup.position);
+    heldGroup.rotation.set(0, clip === 'climb' || clip === 'grab' ? Math.PI * 0.75 : 0, 0);
+  }
+
+  function showModel(): void {
+    const kong = state.model === 'kong';
+    pose.visible = kong;
+    solo.mesh.visible = !kong;
+    skel.visible = state.skeleton && kong;
+    kongCtl.forEach((c) => c.show(kong));
+    blondeCtl.forEach((c) => c.show(!kong));
+    if (!kong) { wall.visible = false; ground.position.z = 0; }
   }
 
   function placeScenery(clip: KongClip, phase: number): void {
@@ -154,6 +202,12 @@ async function main(): Promise<void> {
   if (params.has('weights')) { paintWeights(params.get('weights')!); rig.mesh.material = weightMat; }
   if (params.has('skeleton')) skel.visible = true;
   const sheet = params.get('sheet') as KongClip | null;
+  if (sheet && state.model === 'blonde') {
+    pose.visible = false;
+    heldGroup.visible = false;
+  } else {
+    solo.mesh.visible = false;
+  }
   if (sheet) {
     const frames = parseInt(params.get('frames') ?? '8', 10);
     const views = (params.get('views') ?? 'side,front').split(',');
@@ -167,10 +221,16 @@ async function main(): Promise<void> {
     const span = sheet === 'fall' ? 1 + FALL_SETTLE : 1;
     views.forEach((v, row) => {
       for (let i = 0; i < frames; i++) {
-        poseAt(sheet, span * i / (sheet === 'fall' ? frames - 1 : frames));
+        if (state.model === 'blonde') {
+          solo.apply(sheet as unknown as BlondeClip, 2 * i / frames);
+          wall.visible = false;
+        } else poseAt(sheet, span * i / (sheet === 'fall' ? frames - 1 : frames));
         const [x, y, z] = VIEWS[v] ?? VIEWS.three;
-        cam.position.set(x, y + 200, z).multiplyScalar(1.05);
-        cam.lookAt(0, 0, sheet === 'climb' ? 300 : 0);
+        // zoom=3: closer, on the blonde in its fist if it has one
+        const zoom = parseFloat(params.get('zoom') ?? '1');
+        const at = zoom > 1 && heldGroup.visible ? heldGroup.position.clone() : new THREE.Vector3(0, 0, sheet === 'climb' ? 300 : 0);
+        cam.position.set(x, y + 200, z).multiplyScalar(1.05 / zoom).add(at);
+        cam.lookAt(at);
         const yPix = (views.length - 1 - row) * tile;
         renderer.setViewport(i * tile, yPix, tile, tile);
         renderer.setScissor(i * tile, yPix, tile, tile);
@@ -201,19 +261,25 @@ async function main(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
-  const gui = new GUI({ title: 'Kong' });
-  gui.add(state, 'clip', CLIPS).onChange(() => { walked = climbed = fallTime = 0; });
+  const gui = new GUI({ title: 'Kong & blonde' });
+  gui.add(state, 'model', ['kong', 'blonde']).onChange(showModel);
+  const kongCtl = [
+    gui.add(state, 'clip', CLIPS).onChange(() => { walked = climbed = fallTime = 0; }),
+    gui.add(state, 'carry'),
+  ];
+  const blondeCtl = [gui.add(state, 'blondeClip', BLONDE_CLIPS).name('clip')];
   gui.add(state, 'speed', 0, 2, 0.05);
   gui.add(state, 'paused');
   const phaseCtl = gui.add(state, 'phase', 0, 1 + FALL_SETTLE, 0.001).listen().onChange(() => { state.paused = true; });
   gui.add(state, 'fallSign', { 'onto its back': 1, 'onto its face': -1 });
-  gui.add(state, 'skeleton').onChange((v: boolean) => { skel.visible = v; });
+  gui.add(state, 'skeleton').onChange((v: boolean) => { skel.visible = v && state.model === 'kong'; });
   gui.add(state, 'weights', ['off', 'all', ...rig.boneNames]).onChange((v: string) => {
     if (v === 'off') rig.mesh.material = skinMat;
     else { paintWeights(v); rig.mesh.material = weightMat; }
   });
   gui.add(state, 'wireframe').onChange((v: boolean) => { skinMat.wireframe = v; weightMat.wireframe = v; });
   gui.add(state, 'view', Object.keys(VIEWS)).onChange(setView);
+  showModel();
   void phaseCtl;
 
   window.addEventListener('keydown', (e) => {
@@ -224,13 +290,24 @@ async function main(): Promise<void> {
   });
 
   // for scripts driving the page
-  (window as unknown as { kongtest: unknown }).kongtest = { state, setView, rig, anim };
+  (window as unknown as { kongtest: unknown }).kongtest = { state, setView, rig, anim, solo };
+  let secs = 0;
 
   let last = performance.now();
   function frame(now: number): void {
     const dt = Math.min(0.1, (now - last) / 1000) * state.speed;
     last = now;
     rig.fallSign = state.fallSign;
+    rig.carry = state.carry;
+    if (state.model === 'blonde') {
+      if (!state.paused) state.phase = (secs += dt);
+      soloAnim.play(dt, state.blondeClip, 0, state.phase);
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(frame);
+      return;
+    }
+    if (!state.paused) secs += dt;
     if (state.paused) {
       anim.update(1, state.clip, 0, state.phase); // (a long dt: no blend)
     } else {
@@ -243,6 +320,7 @@ async function main(): Promise<void> {
           anim.update(dt, 'fall', 0, ph);
           break;
         }
+        case 'grab': anim.update(dt, 'grab'); if (anim.phase >= 1) anim.phase = 0; break;
         default: anim.update(dt, state.clip); break;
       }
       state.phase = anim.phase % (state.clip === 'fall' ? 99 : 1);
@@ -250,6 +328,9 @@ async function main(): Promise<void> {
     }
     placeScenery(state.clip, state.clip === 'walk' && !state.paused ? walked / WALK_STRIDE
       : state.clip === 'climb' && !state.paused ? climbed / CLIMB_STRIDE : state.phase);
+    pose.updateMatrixWorld(true);
+    placeHeld(state.clip, anim.phase, secs);
+    if (heldGroup.visible) heldAnim.play(dt, 'held', 0, secs);
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(frame);

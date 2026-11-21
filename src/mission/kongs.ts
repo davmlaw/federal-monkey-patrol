@@ -7,9 +7,10 @@ import * as THREE from 'three';
 import { loadModel, loadSound, playBang, playSound } from '../core/assets.ts';
 import { settings } from '../core/settings.ts';
 import { gamestats, Stat } from './stats.ts';
-import { BLOCKSIZE, type Hit } from './city.ts';
+import { BLOCKSIZE, type Box, type Hit } from './city.ts';
 import { Entity, type World } from './world.ts';
-import { FALL_SETTLE, KongAnimator, KongRig, type KongClip } from './kongrig.ts';
+import { FALL_SETTLE, GRAB_GOT, GRAB_SECONDS, KongAnimator, KongRig, type KongClip } from './kongrig.ts';
+import { Blonde, BlondeKit } from './blonde.ts';
 
 interface KongConfig {
   model: string;
@@ -102,7 +103,8 @@ type Task =
   | { kind: 'turn'; yaw: number }
   | { kind: 'climb'; y: number } // up or down a wall
   | { kind: 'wait'; msecs: number; roar: boolean }
-  | { kind: 'wall'; wall: Wall | null }; // gets on / off a wall
+  | { kind: 'wall'; wall: Wall | null } // gets on / off a wall
+  | { kind: 'grab'; msecs: number }; // reaches in at a window for a blonde
 
 /** A wall face: outward normal (nx, nz) and the face at nx*x + nz*z = d. */
 interface Wall { nx: number; nz: number; d: number }
@@ -143,6 +145,11 @@ export class Kong extends Entity {
   home: Area | null = null;
   /** Lives on a roof: turns about and roars, never walks off. */
   perched = false;
+  /** Blondes to carry off (none in the rooftop modes). */
+  kit: BlondeKit | null = null;
+  /** The one in its fist. */
+  blonde: Blonde | null = null;
+  private fist = new THREE.Vector3();
 
   constructor(
     private pose: THREE.Group, // topples, pivoting at the feet
@@ -239,6 +246,8 @@ export class Kong extends Entity {
     this.dying = true;
     this.tasks = [];
     gamestats.inc(Stat.MONKEY_DEATHS);
+    this.anim.rig.carry = false;
+    let thrown: THREE.Vector3 | null = null; // which way she's thrown
     this.bellow();
     const pos = this.object.position;
     const h = this.cfg.height;
@@ -256,6 +265,7 @@ export class Kong extends Entity {
         clear -= pos.x * w.nx + pos.z * w.nz - w.d; // (it may be inside, on the roof)
       }
       this.fallTo.addScaledVector(out, Math.max(0, clear));
+      thrown = out;
       if (out.dot(back) < 0) this.fallSign = -1; // facing out: falls forward
       // land on whatever is below: the street or a lower roof
       const top = this.fallTo.clone().setY(pos.y - 0.5);
@@ -268,6 +278,9 @@ export class Kong extends Entity {
     }
     this.pose.rotation.set(0, 0, 0);
     this.anim.rig.fallSign = this.fallSign;
+    // she's let go (and up high, thrown clear of the roof)
+    this.blonde?.drop(thrown);
+    this.blonde = null;
   }
 
   private updateFall(world: World, msecs: number): void {
@@ -355,7 +368,7 @@ export class Kong extends Entity {
       }
       case 'climb': {
         const dy = task.y - pos.y;
-        const step = this.cfg.climbSpeed * dt;
+        const step = (this.blonde && this.kit ? this.kit.cfg.climbSpeed : this.cfg.climbSpeed) * dt;
         pos.y = Math.abs(dy) <= step ? task.y : pos.y + Math.sign(dy) * step;
         done = pos.y === task.y;
         clip = 'climb';
@@ -375,6 +388,19 @@ export class Kong extends Entity {
         this.wall = task.wall;
         done = true;
         break;
+      case 'grab': {
+        const got = GRAB_GOT * GRAB_SECONDS * 1000;
+        const before = task.msecs;
+        task.msecs += msecs;
+        if (before < got && task.msecs >= got && this.kit && !this.blonde) {
+          this.blonde = this.kit.make(world);
+          this.anim.rig.carry = true;
+          this.blonde.scream();
+        }
+        clip = 'grab';
+        done = task.msecs >= GRAB_SECONDS * 1000;
+        break;
+      }
     }
     if (done) {
       this.tasks.shift();
@@ -388,6 +414,23 @@ export class Kong extends Entity {
       travel = turned * TURN_STEP * this.cfg.height;
     }
     this.anim.update(dt, clip, travel / this.scale);
+    if (this.blonde) this.carry(clip);
+  }
+
+  /** Her waist in its right fist; facing the way it does, or away from the
+   *  wall while it climbs. */
+  private carry(clip: KongClip): void {
+    this.object.updateMatrixWorld(true);
+    this.anim.rig.tip('hand.R', 0.45, this.fist);
+    const onWall = clip === 'climb' || clip === 'grab';
+    this.blonde!.holdAt(this.fist, this.yaw + (onWall ? Math.PI * 0.75 : 0));
+  }
+
+  /** Gone (left behind), and the blonde it has with it. */
+  remove(): void {
+    this.dead = true;
+    this.blonde?.remove();
+    this.blonde = null;
   }
 
   private turn(diff: number, dt: number): void {
@@ -412,7 +455,14 @@ export class Kong extends Entity {
       this.tasks.push({ kind: 'walk', x, z }); // (to the crossing first)
       return;
     }
-    if (Math.random() < this.cfg.climbChance && this.planClimb(world, x, z)) return;
+    if (this.blonde && this.kit) {
+      // carrying one: up another tall one with her
+      if (Math.random() < this.kit.cfg.climbChance && this.planClimb(world, x, z, false)) return;
+    } else if (Math.random() < this.cfg.climbChance) {
+      const kidnap = !!this.kit && Math.random() < this.kit.cfg.grabChance && this.kit.canKidnap();
+      if (kidnap && this.planClimb(world, x, z, true)) return;
+      if (this.planClimb(world, x, z, false)) return;
+    }
     const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     let options = dirs.filter(([dx, dz]) => !this.lastDir || dx !== -this.lastDir[0] || dz !== -this.lastDir[1] || Math.random() < 0.05);
     const home = this.home;
@@ -429,68 +479,136 @@ export class Kong extends Entity {
   /** Find a building on a corner of the crossing (x, z) with a face on the
    *  street that is clear all the way up and not too tall, and plan the
    *  climb: along the street to it, up, onto the roof to roar for a while,
-   *  then back down to the crossing. */
-  private planClimb(world: World, x: number, z: number): boolean {
+   *  then back down to the crossing.
+   *
+   *  With a blonde, or to `grab` one, it wants a tall one instead, and
+   *  climbs on up any setbacks above it to the top of the tower: grabbing
+   *  her at a window a few storeys up on the way, staying longer on the
+   *  roof, then climbing back down with her. */
+  private planClimb(world: World, x: number, z: number, grab: boolean): boolean {
     const h = this.cfg.height;
     const half = BLOCKSIZE / 2;
-    interface Climb { street: [number, number]; foot: [number, number]; roof: [number, number]; top: number; wall: Wall }
+    const tall = grab || !!this.blonde;
+    const minTop = tall && this.kit ? this.kit.cfg.minTop : 0;
     const climbs: Climb[] = [];
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
         const bi = Math.floor((x + sx * half) / BLOCKSIZE);
         const bj = Math.floor((z + sz * half) / BLOCKSIZE);
-        for (const b of world.grid.blockBoxes(bi, bj)) {
-          if (b.y0 > 1 || b.y1 < 1.5 * h || b.y1 > this.cfg.climbMax) continue;
+        const boxes = world.grid.blockBoxes(bi, bj);
+        for (const b of boxes) {
+          if (b.y0 > 1 || b.y1 < 1.5 * h || (!tall && b.y1 > this.cfg.climbMax)) continue;
           // the face towards the street along x = x (axis 0), or z = z (axis 2)
-          for (const axis of [0, 2]) {
+          for (const axis of [0, 2] as const) {
             const s = axis === 0 ? sx : sz;
-            const face = axis === 0 ? (s > 0 ? b.x0 : b.x1) : (s > 0 ? b.z0 : b.z1);
             const street = axis === 0 ? x : z;
+            const face = faceOf(b, axis, s);
             if (s * (face - street) > 95) continue; // set back from the street
-            const lo = axis === 0 ? b.z0 : b.x0;
-            const hi = axis === 0 ? b.z1 : b.x1;
+            const [lo, hi] = lateralOf(b, axis);
             if (hi - lo < 0.6 * h) continue;
             const lateral = (lo + hi) / 2;
-            const nx = axis === 0 ? -s : 0;
-            const nz = axis === 0 ? 0 : -s;
-            const at = (out: number, y: number): THREE.Vector3 => axis === 0
-              ? new THREE.Vector3(face - s * out, y, lateral)
-              : new THREE.Vector3(lateral, y, face - s * out);
+            const at = (f: number, l: number, out: number, y: number): THREE.Vector3 => axis === 0
+              ? new THREE.Vector3(f - s * out, y, l)
+              : new THREE.Vector3(l, y, f - s * out);
             // clear all the way up the face?
-            if (world.grid.sweep(at(3, 2), at(3, b.y1 - 1), 0)) continue;
+            if (world.grid.sweep(at(face, lateral, 3, 2), at(face, lateral, 3, b.y1 - 1), 0)) continue;
+            const stage = (f: number, l: number, y0: number, y1: number): Stage => {
+              const foot = at(f, l, CLIMB_OFF * h, 0);
+              const nx = axis === 0 ? -s : 0;
+              const nz = axis === 0 ? 0 : -s;
+              return { foot: [foot.x, foot.z], y0, y1, wall: { nx, nz, d: nx * foot.x + nz * foot.z - CLIMB_OFF * h } };
+            };
+            const stages = [stage(face, lateral, 0, b.y1)];
+            // on up the setbacks: a box standing on this one's roof, its
+            // face on the same side and clear
+            let cur = b;
+            let f = face;
+            let l = lateral;
+            while (tall) {
+              const next = boxes.find((n) => {
+                if (Math.abs(n.y0 - cur.y1) > 2 || n.y1 - n.y0 < 0.8 * h) return false;
+                const [nlo, nhi] = lateralOf(n, axis);
+                if (nhi - nlo < 0.6 * h || s * (faceOf(n, axis, s) - f) < 0) return false;
+                const nl = THREE.MathUtils.clamp(l, nlo + 0.3 * h, nhi - 0.3 * h);
+                return !world.grid.sweep(at(faceOf(n, axis, s), nl, 3, n.y0 + 2), at(faceOf(n, axis, s), nl, 3, n.y1 - 1), 0);
+              });
+              if (!next) break;
+              const [nlo, nhi] = lateralOf(next, axis);
+              l = THREE.MathUtils.clamp(l, nlo + 0.3 * h, nhi - 0.3 * h);
+              f = faceOf(next, axis, s);
+              stages.push(stage(f, l, next.y0, next.y1));
+              cur = next;
+            }
+            const top = cur.y1;
+            if (top < minTop) continue;
             // somewhere to stand on the roof
-            const depth = [0.25 * h, 0.12 * h, 0].find((d) => !world.grid.sweep(at(-d, b.y1 + 1), at(-d, b.y1 + 0.8 * h), 0));
+            const depth = [0.25 * h, 0.12 * h, 0].find((d) => !world.grid.sweep(at(f, l, -d, top + 1), at(f, l, -d, top + 0.8 * h), 0));
             if (depth === undefined) continue;
-            const foot = at(CLIMB_OFF * h, 0);
-            const roof = at(-depth, 0);
+            const roof = at(f, l, -depth, 0);
             climbs.push({
               street: axis === 0 ? [street, lateral] : [lateral, street],
-              foot: [foot.x, foot.z],
+              stages,
               roof: [roof.x, roof.z],
-              top: b.y1,
-              wall: { nx, nz, d: nx * foot.x + nz * foot.z - CLIMB_OFF * h },
+              top,
             });
           }
         }
       }
     }
     if (!climbs.length) return false;
-    // taller buildings are likelier
-    let pick = Math.random() * climbs.reduce((sum, c) => sum + c.top, 0);
-    const c = climbs.find((cl) => (pick -= cl.top) <= 0) ?? climbs[climbs.length - 1];
-    const toWall = headingOf(-c.wall.nx, -c.wall.nz);
+    // taller buildings are likelier (much likelier, carrying a blonde)
+    const weight = (c: Climb): number => tall ? c.top * c.top : c.top;
+    let pick = Math.random() * climbs.reduce((sum, c) => sum + weight(c), 0);
+    const c = climbs.find((cl) => (pick -= weight(cl)) <= 0) ?? climbs[climbs.length - 1];
+    const first = c.stages[0];
+    const last = c.stages[c.stages.length - 1];
+    const toWall = headingOf(-first.wall.nx, -first.wall.nz);
     this.tasks.push(
       { kind: 'walk', x: c.street[0], z: c.street[1] },
-      { kind: 'walk', x: c.foot[0], z: c.foot[1] },
+      { kind: 'walk', x: first.foot[0], z: first.foot[1] },
       { kind: 'turn', yaw: toWall },
-      { kind: 'wall', wall: c.wall },
-      { kind: 'climb', y: c.top },
+    );
+    // up, stage by stage
+    c.stages.forEach((st, i) => {
+      if (i > 0) this.tasks.push({ kind: 'step', x: st.foot[0], z: st.foot[1] });
+      this.tasks.push({ kind: 'wall', wall: st.wall });
+      if (i === 0 && grab) {
+        // a window a few storeys up, at about chest height
+        const y = rand(10, Math.min(60, st.y1 - 0.9 * h));
+        if (y > 5) this.tasks.push({ kind: 'climb', y }, { kind: 'grab', msecs: 0 });
+      }
+      this.tasks.push({ kind: 'climb', y: st.y1 });
+    });
+    this.tasks.push(
       { kind: 'step', x: c.roof[0], z: c.roof[1] },
       { kind: 'turn', yaw: toWall + Math.PI },
-      { kind: 'wait', msecs: rand(...ROOF_MSECS), roar: true },
+    );
+    if (tall && this.kit) {
+      // a good long while up there, roaring and looking about
+      let stay = rand(...this.kit.cfg.roofMsecs);
+      while (stay > 0) {
+        const look = rand(1500, 4000);
+        this.tasks.push(
+          { kind: 'wait', msecs: 4500, roar: true },
+          { kind: 'turn', yaw: toWall + Math.PI + rand(-1.2, 1.2) },
+          { kind: 'wait', msecs: look, roar: false },
+        );
+        stay -= 4500 + look + 1000;
+      }
+    } else {
+      this.tasks.push({ kind: 'wait', msecs: rand(...ROOF_MSECS), roar: true });
+    }
+    this.tasks.push(
       { kind: 'turn', yaw: toWall },
-      { kind: 'step', x: c.foot[0], z: c.foot[1] },
-      { kind: 'climb', y: 0 },
+      { kind: 'step', x: last.foot[0], z: last.foot[1] },
+    );
+    // and down again
+    for (let i = c.stages.length - 1; i >= 0; i--) {
+      const st = c.stages[i];
+      this.tasks.push({ kind: 'wall', wall: st.wall }, { kind: 'climb', y: st.y0 });
+      if (i > 0) this.tasks.push({ kind: 'step', x: c.stages[i - 1].foot[0], z: c.stages[i - 1].foot[1] });
+    }
+    this.tasks.push(
       { kind: 'wall', wall: null },
       { kind: 'walk', x: c.street[0], z: c.street[1] },
       { kind: 'walk', x, z },
@@ -499,6 +617,18 @@ export class Kong extends Entity {
     return true;
   }
 }
+
+/** One wall of a climb: stand at `foot` (out from the face) at y0, climb
+ *  to y1. */
+interface Stage { foot: [number, number]; wall: Wall; y0: number; y1: number }
+interface Climb { street: [number, number]; stages: Stage[]; roof: [number, number]; top: number }
+
+/** A box's face towards a street on its -side (s = 1: the street is at
+ *  lower x or z) along axis 0 (x) or 2 (z). */
+const faceOf = (b: Box, axis: 0 | 2, s: number): number =>
+  axis === 0 ? (s > 0 ? b.x0 : b.x1) : (s > 0 ? b.z0 : b.z1);
+/** A box's extent along that face. */
+const lateralOf = (b: Box, axis: 0 | 2): [number, number] => axis === 0 ? [b.z0, b.z1] : [b.x0, b.x1];
 
 // ---------------------------------------------------------------- the troop
 
@@ -557,6 +687,8 @@ export class KongTroop {
     private cfg: KongConfig,
     opts: TroopOptions,
     readonly area: Area,
+    /** Blondes for them to carry off (null in the rooftop modes). */
+    readonly blondes: BlondeKit | null,
   ) {
     this.count = opts.count ?? cfg.count;
     this.respawns = opts.respawnMsecs !== null;
@@ -570,11 +702,12 @@ export class KongTroop {
   /** They keep to `area`. */
   static async create(opts: TroopOptions, area: Area): Promise<KongTroop> {
     const cfg = loadConfig();
-    const [proto, roar] = await Promise.all([
+    const [proto, roar, blondes] = await Promise.all([
       loadModel(cfg.model, cfg.skin),
       loadSound('data/sound/sfx/kong_roar.wav'),
+      opts.rooftops ? null : BlondeKit.create(),
     ]);
-    return new KongTroop(proto, roar, cfg, opts, area);
+    return new KongTroop(proto, roar, cfg, opts, area, blondes);
   }
 
   private make(): Kong {
@@ -679,6 +812,7 @@ export class KongTroop {
     const kong = this.make();
     kong.ear = player;
     kong.home = this.area;
+    kong.kit = this.blondes;
     if (roof) {
       kong.placeAt(roof[0], roof[2], Math.random() * Math.PI * 2, roof[1]);
       kong.perched = true;
@@ -700,7 +834,7 @@ export class KongTroop {
     for (const k of this.kongs) {
       const p = k.object.position;
       if (!k.isDying() && Math.hypot(p.x - ax, p.z - az) > r * LEFT_BEHIND) {
-        k.dead = true;
+        k.remove();
         replace++;
       }
     }

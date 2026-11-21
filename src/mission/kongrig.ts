@@ -10,7 +10,7 @@ import * as THREE from 'three';
 
 type V3 = [number, number, number];
 
-interface BoneDef {
+export interface BoneDef {
   name: string;
   parent: string | null;
   head: V3; // the joint
@@ -37,7 +37,7 @@ const LEFT: BoneDef[] = [
   { name: 'shin.L', parent: 'thigh.L', head: [320, -1100, -320], tail: [430, -1450, -330], radius: 190, side: 1 },
   { name: 'foot.L', parent: 'shin.L', head: [430, -1450, -330], tail: [420, -1660, 60], radius: 140, side: 1 },
 ];
-const mirror = (d: BoneDef): BoneDef => ({
+export const mirror = (d: BoneDef): BoneDef => ({
   ...d,
   name: d.name.replace('.L', '.R'),
   parent: d.parent?.replace('.L', '.R') ?? null,
@@ -46,14 +46,13 @@ const mirror = (d: BoneDef): BoneDef => ({
   side: -1,
 });
 const DEFS: BoneDef[] = [...BODY, ...LEFT, ...LEFT.map(mirror)];
-const DEF = new Map(DEFS.map((d) => [d.name, d]));
 
 /** The sole of the feet, in model units. */
 export const GROUND_Y = -1662;
 
 // ----------------------------------------------------------- skin weights
 
-const WEIGHT_FALLOFF = 70; // model units: how soft the joints are
+const WEIGHT_FALLOFF = 70; // model units: how soft the kong's joints are
 
 function segmentDistance(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3): number {
   const ab = b.clone().sub(a);
@@ -61,14 +60,15 @@ function segmentDistance(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3): 
   return a.clone().addScaledVector(ab, t).distanceTo(p);
 }
 
-/** Adds skinIndex/skinWeight to the model's geometry (once: it's shared). */
-function skin(geom: THREE.BufferGeometry): void {
+/** Adds skinIndex/skinWeight to a model's geometry for the bones `defs`
+ *  (once: it's shared). */
+function skin(geom: THREE.BufferGeometry, defs: BoneDef[], falloff: number): void {
   if (geom.getAttribute('skinIndex')) return;
   const pos = geom.getAttribute('position');
   const n = pos.count;
   const index = new Uint16Array(n * 4);
   const weight = new Float32Array(n * 4);
-  const segs = DEFS.map((d) => ({ a: new THREE.Vector3(...d.head), b: new THREE.Vector3(...d.tail), d }));
+  const segs = defs.map((d) => ({ a: new THREE.Vector3(...d.head), b: new THREE.Vector3(...d.tail), d }));
   const p = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
     p.fromBufferAttribute(pos, i);
@@ -76,7 +76,7 @@ function skin(geom: THREE.BufferGeometry): void {
     const cands = segs.flatMap((s, bi) => (s.d.side === 0 || side === 0 || s.d.side === side)
       ? [{ bi, d: segmentDistance(p, s.a, s.b) - s.d.radius }] : []);
     cands.sort((x, y) => x.d - y.d);
-    const best = cands.slice(0, 4).map((c) => ({ bi: c.bi, w: Math.exp(-(c.d - cands[0].d) / WEIGHT_FALLOFF) }));
+    const best = cands.slice(0, 4).map((c) => ({ bi: c.bi, w: Math.exp(-(c.d - cands[0].d) / falloff) }));
     const sum = best.reduce((s, c) => s + c.w, 0);
     best.forEach((c, k) => {
       index[i * 4 + k] = c.bi;
@@ -104,11 +104,11 @@ function mapFrame(d0: THREE.Vector3, n0: THREE.Vector3, d: THREE.Vector3, n: THR
   return new THREE.Quaternion().setFromRotationMatrix(m);
 }
 
-const euler = (x: number, y: number, z: number): THREE.Quaternion =>
+export const euler = (x: number, y: number, z: number): THREE.Quaternion =>
   new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'YXZ'));
 
-const frac = (x: number): number => x - Math.floor(x);
-const smooth = (x: number): number => {
+export const frac = (x: number): number => x - Math.floor(x);
+export const smooth = (x: number): number => {
   const t = THREE.MathUtils.clamp(x, 0, 1);
   return t * t * (3 - 2 * t);
 };
@@ -116,7 +116,7 @@ const smooth = (x: number): number => {
 /** A foot (or hand) going round a step cycle of phase 0..1: on the ground
  *  for the first `stance` of it, sliding back by `stance` strides, then
  *  lifted and swung forward. `along` runs +stance/2 .. -stance/2. */
-function stepCycle(phase: number, stance = 0.6): { along: number; lift: number } {
+export function stepCycle(phase: number, stance = 0.6): { along: number; lift: number } {
   const f = frac(phase);
   if (f < stance) return { along: stance * (0.5 - f / stance), lift: 0 };
   const s = (f - stance) / (1 - stance);
@@ -125,8 +125,8 @@ function stepCycle(phase: number, stance = 0.6): { along: number; lift: number }
 
 // ------------------------------------------------------------------- rig
 
-export type KongClip = 'bind' | 'idle' | 'walk' | 'climb' | 'roar' | 'fall';
-export const CLIPS: KongClip[] = ['bind', 'idle', 'walk', 'climb', 'roar', 'fall'];
+export type KongClip = 'bind' | 'idle' | 'walk' | 'climb' | 'roar' | 'fall' | 'grab';
+export const CLIPS: KongClip[] = ['bind', 'idle', 'walk', 'climb', 'roar', 'fall', 'grab'];
 
 /** Model units the body moves in one walk cycle (two steps). */
 export const WALK_STRIDE = 1000;
@@ -134,6 +134,10 @@ export const WALK_STRIDE = 1000;
 export const CLIMB_STRIDE = 900;
 /** Seconds of a roar: beating its chest, then arms up and bellowing. */
 export const ROAR_SECONDS = 4;
+/** Seconds of a grab: on the wall, reaching in at a window with the right
+ *  hand and pulling a blonde out. She's in its fist from GRAB_GOT on. */
+export const GRAB_SECONDS = 3.5;
+export const GRAB_GOT = 0.5;
 export const IDLE_SECONDS = 3.2;
 /** Fall phases: 0..1 falling (with the whole body toppled by the caller),
  *  then 1..1+FALL_SETTLE settling limp on the ground. */
@@ -144,35 +148,40 @@ interface Limb { upper: string; fore: string; end: string; a: number; b: number;
 /** Turning a hand or foot on its forearm or shin. */
 interface EndTurn { twist?: number; curl?: number }
 
-export class KongRig {
+/**
+ * A skeleton of `defs` placed on a model, skinned by distance, posed
+ * directly by the clips of a subclass (apply()), with two-bone IK for
+ * the arms and legs: bones named hips, upperArm/foreArm/hand.L/R and
+ * thigh/shin/foot.L/R.
+ */
+export abstract class Rig {
   readonly mesh: THREE.SkinnedMesh;
   readonly bones = new Map<string, THREE.Bone>();
-  readonly boneNames = DEFS.map((d) => d.name);
-  /** Where the wall is while climbing: this far in front (+Z) of the origin. */
-  wallZ = 730;
-  /** Falling onto its back (+1) or its face (-1). */
-  fallSign = 1;
+  readonly boneNames: string[];
+  protected def: Map<string, BoneDef>;
   private offsets = new Map<string, THREE.Vector3>();
   private limbs = new Map<string, Limb>();
   // solved this frame, in the mesh's space
-  private wq = new Map<string, THREE.Quaternion>();
-  private wp = new Map<string, THREE.Vector3>();
+  protected wq = new Map<string, THREE.Quaternion>();
+  protected wp = new Map<string, THREE.Vector3>();
 
-  constructor(geom: THREE.BufferGeometry, material: THREE.Material | THREE.Material[]) {
-    skin(geom);
+  constructor(geom: THREE.BufferGeometry, material: THREE.Material | THREE.Material[], private defs: BoneDef[], falloff: number) {
+    this.boneNames = defs.map((d) => d.name);
+    this.def = new Map(defs.map((d) => [d.name, d]));
+    skin(geom, defs, falloff);
     this.mesh = new THREE.SkinnedMesh(geom, material);
-    for (const d of DEFS) {
+    for (const d of defs) {
       const bone = new THREE.Bone();
       bone.name = d.name;
       const off = new THREE.Vector3(...d.head);
-      if (d.parent) off.sub(new THREE.Vector3(...DEF.get(d.parent)!.head));
+      if (d.parent) off.sub(new THREE.Vector3(...this.def.get(d.parent)!.head));
       this.offsets.set(d.name, off);
       bone.position.copy(off);
       this.bones.set(d.name, bone);
       (d.parent ? this.bones.get(d.parent)! : this.mesh).add(bone);
     }
     this.mesh.updateMatrixWorld(true);
-    this.mesh.bind(new THREE.Skeleton(DEFS.map((d) => this.bones.get(d.name)!)));
+    this.mesh.bind(new THREE.Skeleton(defs.map((d) => this.bones.get(d.name)!)));
     // (the arms swing well out of the bind pose's bounds)
     geom.computeBoundingSphere();
     this.mesh.boundingSphere = geom.boundingSphere!.clone();
@@ -184,9 +193,9 @@ export class KongRig {
   }
 
   private limb(upper: string, fore: string, end: string, pole: THREE.Vector3 | null): Limb {
-    const S = new THREE.Vector3(...DEF.get(upper)!.head);
-    const E = new THREE.Vector3(...DEF.get(fore)!.head);
-    const W = new THREE.Vector3(...DEF.get(end)!.head);
+    const S = new THREE.Vector3(...this.def.get(upper)!.head);
+    const E = new THREE.Vector3(...this.def.get(fore)!.head);
+    const W = new THREE.Vector3(...this.def.get(end)!.head);
     const u = W.clone().sub(S).normalize();
     // which way the joint bends: given (the knees), or as modelled (the elbows)
     const p = (pole ?? E.clone().sub(S)).clone();
@@ -203,35 +212,35 @@ export class KongRig {
   // --------------------------------------------------------- the solver
 
   private parentQ(name: string): THREE.Quaternion {
-    const p = DEF.get(name)!.parent;
+    const p = this.def.get(name)!.parent;
     return p ? this.wq.get(p)! : new THREE.Quaternion();
   }
 
   /** Where a joint is, once its parent has been posed. */
   joint(name: string): THREE.Vector3 {
-    const p = DEF.get(name)!.parent!;
+    const p = this.def.get(name)!.parent!;
     return this.offsets.get(name)!.clone().applyQuaternion(this.wq.get(p)!).add(this.wp.get(p)!);
   }
 
-  private setWorld(name: string, q: THREE.Quaternion): void {
+  protected setWorld(name: string, q: THREE.Quaternion): void {
     const pos = this.joint(name);
     this.bones.get(name)!.quaternion.copy(this.parentQ(name).clone().invert().multiply(q));
     this.wq.set(name, q.clone());
     this.wp.set(name, pos);
   }
 
-  private setLocal(name: string, q: THREE.Quaternion): void {
+  protected setLocal(name: string, q: THREE.Quaternion): void {
     this.setWorld(name, this.parentQ(name).clone().multiply(q));
   }
 
   /** Mirror a left-side rotation for the right. */
-  private sided(side: number, x: number, y: number, z: number): THREE.Quaternion {
+  protected sided(side: number, x: number, y: number, z: number): THREE.Quaternion {
     return euler(x, side * y, side * z);
   }
 
-  private root(offset: V3, rot: THREE.Quaternion): void {
+  protected root(offset: V3, rot: THREE.Quaternion): void {
     const bone = this.bones.get('hips')!;
-    const pos = new THREE.Vector3(...DEF.get('hips')!.head).add(new THREE.Vector3(...offset));
+    const pos = new THREE.Vector3(...this.def.get('hips')!.head).add(new THREE.Vector3(...offset));
     bone.position.copy(pos);
     bone.quaternion.copy(rot);
     this.wq.set('hips', rot.clone());
@@ -242,7 +251,7 @@ export class KongRig {
    *  `pole`; then the hand or foot turned to `endQ` (in the mesh's space),
    *  or turned on the forearm or shin: twisted about it (+ turns the palm
    *  or sole out) and curled (+ bends it towards the inside of the joint). */
-  private reach(limbName: string, target: THREE.Vector3, pole: THREE.Vector3, endQ: THREE.Quaternion | EndTurn | null = null): void {
+  protected reach(limbName: string, target: THREE.Vector3, pole: THREE.Vector3, endQ: THREE.Quaternion | EndTurn | null = null): void {
     const L = this.limbs.get(limbName)!;
     const S = this.joint(L.upper);
     const to = target.clone().sub(S);
@@ -269,21 +278,58 @@ export class KongRig {
 
   /** The rest of the torso: spine, chest, neck and head, each turned
    *  (pitch forward +, yaw to its left +, roll) on the one below. */
-  private torso(spine: V3, chest: V3, neck: V3, head: V3): void {
+  protected torso(spine: V3, chest: V3, neck: V3, head: V3): void {
     this.setLocal('spine', euler(...spine));
     this.setLocal('chest', euler(...chest));
     this.setLocal('neck', euler(...neck));
     this.setLocal('head', euler(...head));
   }
 
-  private clavicles(lift: number, forward = 0): void {
+  protected clavicles(lift: number, forward = 0): void {
     for (const s of [1, -1]) this.setLocal(`clavicle.${s > 0 ? 'L' : 'R'}`, this.sided(s, 0, -forward, -lift));
   }
 
   /** A point in the chest's frame (as if it were in the bind pose). */
-  private onChest(x: number, y: number, z: number): THREE.Vector3 {
-    const c = new THREE.Vector3(...DEF.get('chest')!.head);
+  protected onChest(x: number, y: number, z: number): THREE.Vector3 {
+    const c = new THREE.Vector3(...this.def.get('chest')!.head);
     return new THREE.Vector3(x, y, z).sub(c).applyQuaternion(this.wq.get('chest')!).add(this.wp.get('chest')!);
+  }
+
+  protected bind(): void {
+    this.root([0, 0, 0], new THREE.Quaternion());
+    for (const d of this.defs) if (d.parent) this.setLocal(d.name, new THREE.Quaternion());
+  }
+  /** Feet planted where they are in the bind pose, flat. */
+  protected stand(spread = 0): void {
+    for (const s of [1, -1]) {
+      const side = s > 0 ? 'L' : 'R';
+      const a = new THREE.Vector3(...this.def.get(`foot.${side}`)!.head);
+      a.x += s * spread;
+      this.reach(`leg.${side}`, a, new THREE.Vector3(s * 0.25, 0, 1), new THREE.Quaternion());
+    }
+  }
+  /** Where `bone`'s far end, `k` of the way along (e.g. a fist), is in the
+   *  world. */
+  tip(bone: string, k: number, target = new THREE.Vector3()): THREE.Vector3 {
+    const d = this.def.get(bone)!;
+    const v = new THREE.Vector3(...d.tail).sub(new THREE.Vector3(...d.head)).multiplyScalar(k);
+    return this.bones.get(bone)!.localToWorld(target.copy(v));
+  }
+
+  /** Pose the bones for `clip` at `phase`. */
+  abstract apply(clip: string, phase: number): void;
+}
+
+export class KongRig extends Rig {
+  /** Where the wall is while climbing: this far in front (+Z) of the origin. */
+  wallZ = 730;
+  /** Falling onto its back (+1) or its face (-1). */
+  fallSign = 1;
+  /** Holding a blonde in its right hand (posed over the clips). */
+  carry = false;
+
+  constructor(geom: THREE.BufferGeometry, material: THREE.Material | THREE.Material[]) {
+    super(geom, material, DEFS, WEIGHT_FALLOFF);
   }
 
   // ----------------------------------------------------------- the clips
@@ -297,23 +343,55 @@ export class KongRig {
       case 'climb': this.climb(phase); break;
       case 'roar': this.roar(phase); break;
       case 'fall': this.fall(phase); break;
+      case 'grab': this.grab(phase); break;
+    }
+    if (this.carry && clip !== 'grab' && clip !== 'fall' && clip !== 'bind') this.hold(clip, phase);
+  }
+
+  /** Where the right fist holds a blonde, for each clip: out to the side
+   *  and away from the wall while climbing (one-handed), held up high to
+   *  roar, otherwise in front of its chest. */
+  private holdAt(clip: KongClip, phase: number): THREE.Vector3 {
+    const t = 2 * Math.PI * frac(phase);
+    switch (clip) {
+      case 'climb': return new THREE.Vector3(-1250 + 40 * Math.sin(t), 250 + 60 * Math.sin(t), this.wallZ - 750);
+      case 'roar': {
+        const secs = frac(phase) * ROAR_SECONDS;
+        return new THREE.Vector3(-950, 1750 + 30 * Math.sin(secs * 9), 350);
+      }
+      case 'walk': return new THREE.Vector3(-520 + 30 * Math.cos(t), 620 + 40 * Math.cos(2 * t), 720);
+      default: return new THREE.Vector3(-520, 640 + 15 * Math.sin(t), 700);
     }
   }
 
-  private bind(): void {
-    this.root([0, 0, 0], new THREE.Quaternion());
-    for (const d of DEFS) if (d.parent) this.setLocal(d.name, new THREE.Quaternion());
+  private fistTurn: EndTurn = { twist: 0.3, curl: 0.9 };
+
+  private hold(clip: KongClip, phase: number): void {
+    this.reach('arm.R', this.holdAt(clip, phase), new THREE.Vector3(-1, -0.6, -0.5), this.fistTurn);
   }
 
-  /** Feet planted where they are in the bind pose, flat. */
-  private stand(spread = 0): void {
-    for (const s of [1, -1]) {
-      const side = s > 0 ? 'L' : 'R';
-      const a = new THREE.Vector3(...DEF.get(`foot.${side}`)!.head);
-      a.x += s * spread;
-      this.reach(`leg.${side}`, a, new THREE.Vector3(s * 0.25, 0, 1), new THREE.Quaternion());
-    }
+  /** On the wall (feet and left hand planted), the right hand reaches in
+   *  at a window, rummages, and comes back out to hold her (holdAt). */
+  private grab(phase: number): void {
+    const f = THREE.MathUtils.clamp(phase, 0, 1);
+    this.climb(0.1);
+    const start = this.wp.get('hand.R')!.clone();
+    const wall = this.wallZ;
+    const inside = new THREE.Vector3(-480 + 70 * Math.sin(f * 40), 950 + 50 * Math.sin(f * 31), wall + 260);
+    const held = this.holdAt('climb', 0);
+    const T = f < 0.3 ? start.lerp(inside, smooth(f / 0.3))
+      : f < GRAB_GOT ? inside
+      : inside.lerp(held, smooth((f - GRAB_GOT) / (1 - GRAB_GOT - 0.1)));
+    this.reach('arm.R', T, new THREE.Vector3(-1, -0.6, -0.3), this.fistTurn);
+    // looking at what it's doing: in at the window, then at her
+    const look = smooth(f / 0.2) * (1 - smooth((f - 0.85) / 0.15));
+    this.setLocal('neck', euler(-0.15, -0.35 * look, 0));
+    this.setLocal('head', euler(-0.1 + 0.3 * look * (f > GRAB_GOT ? 1 : 0), -0.4 * look, 0));
   }
+
+
+
+
 
   /** Arms hanging, hands by the knees, swung forward by `swing` (L, R). */
   private hangArms(swingL: number, swingR: number, out = 180, drop = 1250): void {
@@ -445,45 +523,63 @@ export class KongRig {
 // --------------------------------------------------------------- animator
 
 /**
- * Plays the clips on a rig: advances the phase (by distance for walking
- * and climbing, so the feet and hands don't slide; by time otherwise) and
- * blends from the old pose when the clip changes.
+ * Plays a rig's clips: advances the phase and blends from the old pose
+ * when the clip changes.
  */
-export class KongAnimator {
-  clip: KongClip = 'idle';
+export class RigAnimator<C extends string> {
   phase = 0;
   private from: { q: THREE.Quaternion[]; hips: THREE.Vector3 } | null = null;
   private blend = 1;
   private readonly bones: THREE.Bone[];
   static BLEND_SECS = 0.35;
 
-  constructor(readonly rig: KongRig) {
+  constructor(readonly rig: Rig, public clip: C) {
     this.bones = rig.boneNames.map((n) => rig.bones.get(n)!);
+  }
+
+  /** Pose `clip`, with its phase moved on by `advance` (or set to `phase`);
+   *  `restart`: a new clip starts at phase 0. */
+  play(dt: number, clip: C, advance: number, phase?: number, restart = false): void {
+    if (clip !== this.clip) {
+      this.from = { q: this.bones.map((b) => b.quaternion.clone()), hips: this.bones[0].position.clone() };
+      this.blend = 0;
+      this.clip = clip;
+      if (restart) this.phase = 0;
+    }
+    this.phase += advance;
+    if (phase !== undefined) this.phase = phase;
+    this.rig.apply(clip, this.phase);
+    if (this.from && this.blend < 1) {
+      this.blend = Math.min(1, this.blend + dt / RigAnimator.BLEND_SECS);
+      const w = smooth(this.blend);
+      this.bones.forEach((b, i) => b.quaternion.slerpQuaternions(this.from!.q[i], b.quaternion.clone(), w));
+      this.bones[0].position.lerpVectors(this.from.hips, this.bones[0].position.clone(), w);
+    }
+  }
+}
+
+/**
+ * Plays the kong's clips: the phase goes by distance for walking and
+ * climbing, so the feet and hands don't slide, by time otherwise.
+ */
+export class KongAnimator extends RigAnimator<KongClip> {
+  constructor(override readonly rig: KongRig) {
+    super(rig, 'idle');
   }
 
   /** `travel`: model units moved forward (walking) or up (climbing) since
    *  the last update. `phase`, if given, sets it outright (falling). */
   update(dt: number, clip: KongClip, travel = 0, phase?: number): void {
-    if (clip !== this.clip) {
-      this.from = { q: this.bones.map((b) => b.quaternion.clone()), hips: this.bones[0].position.clone() };
-      this.blend = 0;
-      this.clip = clip;
-      if (clip === 'roar' || clip === 'fall') this.phase = 0;
-    }
-    switch (clip) {
-      case 'walk': this.phase += travel / WALK_STRIDE; break;
-      case 'climb': this.phase += travel / CLIMB_STRIDE; break;
-      case 'roar': this.phase += dt / ROAR_SECONDS; break;
-      case 'idle': this.phase += dt / IDLE_SECONDS; break;
-      default: break;
-    }
-    if (phase !== undefined) this.phase = phase;
-    this.rig.apply(clip, this.phase);
-    if (this.from && this.blend < 1) {
-      this.blend = Math.min(1, this.blend + dt / KongAnimator.BLEND_SECS);
-      const w = smooth(this.blend);
-      this.bones.forEach((b, i) => b.quaternion.slerpQuaternions(this.from!.q[i], b.quaternion.clone(), w));
-      this.bones[0].position.lerpVectors(this.from.hips, this.bones[0].position.clone(), w);
-    }
+    const advance = {
+      walk: travel / WALK_STRIDE,
+      climb: travel / CLIMB_STRIDE,
+      roar: dt / ROAR_SECONDS,
+      idle: dt / IDLE_SECONDS,
+      grab: dt / GRAB_SECONDS,
+      bind: 0,
+      fall: 0,
+    }[clip];
+    const restart = clip === 'roar' || clip === 'fall' || clip === 'grab';
+    this.play(dt, clip, advance, phase, restart);
   }
 }

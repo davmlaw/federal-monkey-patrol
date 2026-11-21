@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
-import { Container2D, LEFT, RIGHT, Text2D, TOP } from '../core/draw2d.ts';
+import { Container2D, LEFT, RIGHT, Text2D, textWidth, TOP } from '../core/draw2d.ts';
 import { fetchText, playBang } from '../core/assets.ts';
 import { dircheck, settings } from '../core/settings.ts';
 import type { Input } from '../core/input.ts';
@@ -35,6 +35,8 @@ const OUT_MESSAGE_MSECS = 3000;
 const ROAM_AHEAD = 0.4;
 // When an outcome ends the mission, its message shows this long first.
 const ENDING_MSECS = 4500;
+// A blonde caught or landed: this long the message shows.
+const BLONDE_MESSAGE_MSECS = 2500;
 
 /** How the last mission ended, for the menu: set when it finishes or is
  *  lost, cleared when one loads. */
@@ -50,10 +52,12 @@ function topdownSpeeds(): { min: number; max: number } {
 /** "m:ss" */
 const minutes = (secs: number): string => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
 
-/** "N kongs downed in m:ss" */
+/** "N kongs downed in m:ss", with the blondes caught if there were any. */
 function summary(): string {
   const n = gamestats.get(Stat.MONKEY_DEATHS);
-  return `${n} kong${n === 1 ? '' : 's'} downed in ${minutes(gamestats.get(Stat.GAME_SECONDS))}`;
+  const b = gamestats.get(Stat.BLONDE_RESCUES);
+  const blondes = b + gamestats.get(Stat.BLONDE_CASUALTIES) > 0 ? `, ${b} blonde${b === 1 ? '' : 's'} caught` : '';
+  return `${n} kong${n === 1 ? '' : 's'} downed${blondes} in ${minutes(gamestats.get(Stat.GAME_SECONDS))}`;
 }
 
 /** The Giant Claw. Built from <claw>, but nothing calls update() yet, so
@@ -114,6 +118,8 @@ export class Mission extends GameComponent {
   private turnBack = new TurnBack();
   private outMessage = new Text2D('Out of bounds: you lost a plane', 0.25);
   private outMessageMsecs = 0;
+  private blondeMessage = new Text2D('Caught her!', 0.25);
+  private blondeMessageMsecs = 0;
   // Set by _load(); the mission is only played once it has loaded.
   private fogplane!: FogPlane;
   private hud!: Container2D;
@@ -126,6 +132,8 @@ export class Mission extends GameComponent {
    *  a little ahead of it. */
   private roaming = false;
   private tally = new Tally();
+  /** Blondes caught, under the kongs (when there are blondes). */
+  private blondeTally = new Tally(0.18);
   /** An outcome has ended the mission: the status to take when the banner
    *  has shown for ENDING_MSECS. */
   private ending: { status: Status; msecs: number } | null = null;
@@ -189,6 +197,13 @@ export class Mission extends GameComponent {
     this.world = new World(grid);
     this.world.addEntity(this.player.entity);
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
+    if (this.kongs.blondes) {
+      this.kongs.blondes.plane = this.player.entity;
+      this.hud.add(this.blondeTally, TOP);
+      this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.01;
+      this.blondeTally.setColor(1, 0.95, 0.7);
+    }
+    this.blondeMessage.position.y = 0.2;
     gamestats.reset();
     lastResult.title = lastResult.line = '';
   }
@@ -313,9 +328,12 @@ export class Mission extends GameComponent {
     world.update(msecs);
     if (this.kongs) {
       gamestats.set(Stat.MONKEY_POPULATION, this.kongs.remaining());
-      this.tally.text = this.kongs.respawns
+      const kongs = this.kongs.respawns
         ? `KONGS DOWNED ${gamestats.get(Stat.MONKEY_DEATHS)}`
         : `KONGS LEFT ${this.kongs.remaining()}`;
+      this.tally.text = kongs;
+      this.blondeTally.text = this.kongs.blondes ? `BLONDES CAUGHT ${gamestats.get(Stat.BLONDE_RESCUES)}` : '';
+      this.blondeEvents(msecs);
     }
     if (!plane.crashed && !this.ending && !this.roaming) this.checkBounds(msecs);
     if (plane.crashed && !wasCrashed) {
@@ -326,6 +344,20 @@ export class Mission extends GameComponent {
       this.outside = 0; // a fresh countdown after the respawn
       playBang();
     }
+  }
+
+  /** "Caught her!" when a blonde is caught, "Missed her!" when one lands. */
+  private blondeEvents(msecs: number): void {
+    this.blondeMessageMsecs = Math.max(0, this.blondeMessageMsecs - msecs);
+    const kit = this.kongs?.blondes;
+    if (!kit?.events.length) return;
+    const caught = kit.events.pop() === 'caught';
+    kit.events.length = 0;
+    this.blondeMessage.text = caught ? 'Caught her!' : 'Missed her! She landed with a bump';
+    this.blondeMessage.setWidth(textWidth(this.blondeMessage.text) * this.blondeMessage.font);
+    if (caught) this.blondeMessage.setColor(1, 0.95, 0.6);
+    else this.blondeMessage.setColor(0.85, 0.85, 0.85);
+    this.blondeMessageMsecs = BLONDE_MESSAGE_MSECS;
   }
 
   /** Out of the patrol area for turn_back_seconds: lose a plane and get
@@ -388,6 +420,7 @@ export class Mission extends GameComponent {
       display.draw2d(this.turnBack);
     }
     if (this.outMessageMsecs > 0) display.draw2d(this.outMessage);
+    if (this.blondeMessageMsecs > 0 && !this.ending) display.draw2d(this.blondeMessage);
     if (this.ending) display.draw2d(this.banner);
     else if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
     if (msecs) {
@@ -401,7 +434,10 @@ export class Mission extends GameComponent {
     const o = this.player.entity.object;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(o.quaternion);
     this.radar.plane = { x: o.position.x, z: o.position.z, yaw: Math.atan2(-fwd.x, -fwd.z) };
-    this.radar.blips = (this.kongs?.living() ?? []).map((k) => ({ x: k.object.position.x, z: k.object.position.z }));
+    this.radar.blips = [
+      ...(this.kongs?.living() ?? []).map((k) => ({ x: k.object.position.x, z: k.object.position.z, kind: k.blonde ? 'carrying' as const : 'kong' as const })),
+      ...(this.kongs?.blondes?.falling() ?? []).map((b) => ({ x: b.object.position.x, z: b.object.position.z, kind: 'blonde' as const })),
+    ];
     this.radar.warn = this.outside > 0 && !this.heading;
     this.radar.update(msecs);
   }
