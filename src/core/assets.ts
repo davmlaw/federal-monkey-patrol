@@ -273,3 +273,100 @@ export function playChime(volume = 0.35): void {
     osc.stop(t0 + at + 0.55);
   });
 }
+
+// ------------------------------------------------- gunfire and bullet hits
+
+/** White noise dying away over `seconds` (as `(1 - t)^power`), cached:
+ *  these play many times a second. */
+const noiseCache = new Map<string, AudioBuffer>();
+function noise(ctx: AudioContext, seconds: number, power: number): AudioBuffer {
+  const key = `${seconds}/${power}`;
+  let buf = noiseCache.get(key);
+  if (!buf) {
+    const n = Math.floor(ctx.sampleRate * seconds);
+    buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n) ** power;
+    noiseCache.set(key, buf);
+  }
+  return buf;
+}
+
+/** A burst of noise through a filter, pitched by `rate`. */
+function burst(ctx: AudioContext, seconds: number, power: number, type: BiquadFilterType,
+  freq: number, q: number, volume: number, rate = 1, at = ctx.currentTime): void {
+  const src = ctx.createBufferSource();
+  src.buffer = noise(ctx, seconds, power);
+  src.playbackRate.value = rate;
+  const filter = ctx.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = freq;
+  filter.Q.value = q;
+  const gain = ctx.createGain();
+  gain.gain.value = volume;
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start(at);
+}
+
+/** A thump: a sine falling from `f0` to `f1` Hz over `seconds`. */
+function thump(ctx: AudioContext, f0: number, f1: number, seconds: number, volume: number): void {
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.frequency.setValueAtTime(f0, t0);
+  osc.frequency.exponentialRampToValueAtTime(f1, t0 + seconds);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(volume, t0);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + seconds);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + seconds);
+}
+
+/** The plane's guns (both at once): a short crack with a bit of knock. */
+export function playGunshot(volume = 0.22): void {
+  const ctx = audioCtx;
+  if (!ctx) return;
+  const rate = 0.9 + Math.random() * 0.2;
+  burst(ctx, 0.07, 4, 'bandpass', 1800, 0.7, volume, rate);
+  thump(ctx, 160 * rate, 55, 0.06, volume * 0.8);
+}
+
+// at most one hit sound per this long (two bullets every 75 ms)
+const HIT_GAP = 0.045;
+let lastHit = 0;
+
+/** A bullet striking stone or the street: a sharp tick, and now and then
+ *  a ricochet's whine. */
+export function playRicochet(volume = 0.3): void {
+  const ctx = audioCtx;
+  if (!ctx || volume < 0.01 || ctx.currentTime - lastHit < HIT_GAP) return;
+  lastHit = ctx.currentTime;
+  const rate = 0.85 + Math.random() * 0.3;
+  burst(ctx, 0.04, 3, 'bandpass', 3200, 1.5, volume, rate);
+  if (Math.random() < 0.18) {
+    const t0 = ctx.currentTime;
+    const len = 0.25 + Math.random() * 0.2;
+    const f = 2200 + Math.random() * 1200;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(f, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.4, t0 + len);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(volume * 0.35, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + len);
+  }
+}
+
+/** A bullet striking a kong: a dull, meaty thud. */
+export function playThud(volume = 0.4): void {
+  const ctx = audioCtx;
+  if (!ctx || volume < 0.01 || ctx.currentTime - lastHit < HIT_GAP) return;
+  lastHit = ctx.currentTime;
+  const rate = 0.85 + Math.random() * 0.3;
+  burst(ctx, 0.09, 2, 'lowpass', 700, 0.8, volume, rate);
+  thump(ctx, 110 * rate, 45, 0.1, volume * 0.9);
+}

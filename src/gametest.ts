@@ -24,6 +24,7 @@ import { Input } from './core/input.ts';
 import { Mission } from './mission/mission.ts';
 import { gamestats, Stat } from './mission/stats.ts';
 import type { Kong, Area } from './mission/kongs.ts';
+import { BLOCKSIZE } from './mission/city.ts';
 import type { World, Plane } from './mission/world.ts';
 
 const params = new URLSearchParams(location.search);
@@ -200,6 +201,7 @@ const SCENARIOS: Record<string, Scenario> = {
     const from = blonde.object.position.clone();
     h.run(1500, { each: park });
     h.look('falling', blonde.object.position, 60);
+    h.frame('falling (her head on the radar)');
     if (params.has('catch')) {
       h.run(240000, { each: park, until: () => blonde.object.position.y < from.y - 150 || blonde.state !== 'falling' });
       h.plane.object.position.copy(blonde.object.position).add(new THREE.Vector3(0, 0, 10));
@@ -213,6 +215,56 @@ const SCENARIOS: Record<string, Scenario> = {
       h.check(p.y < from.y - 50, 'she was thrown clear of the roof');
       h.run(1000);
       h.look('landed', p.clone().add(new THREE.Vector3(0, 5, 0)), 40);
+    }
+  },
+
+  /** Kongs shot up on buildings fall down to the street: `n` (default 3)
+   *  of them, each shot as soon as it's `at` (climb: on a wall more than
+   *  60 up; top: roaring on a roof; any: anywhere above the street, e.g.
+   *  with mission=rooftops.xml). Climbs are made certain. */
+  kongfall(h) {
+    for (const k of h.kongs()) h.kong(k).cfg.climbChance = 1;
+    h.plane.charmed = true;
+    // keep the plane out of the way, high over where it starts (the kongs'
+    // area may move with it)
+    const start = h.plane.object.position.clone().setY(2500);
+    const park = (): void => { h.plane.object.position.copy(start); };
+    const at = params.get('at') ?? 'climb';
+    const ready = (k: Kong): boolean => {
+      const task = h.kong(k).tasks[0];
+      const y = k.object.position.y;
+      if (k.isDying() || y < 10) return false;
+      if (at === 'climb') return task?.kind === 'climb' && y > 60;
+      if (at === 'top') return task?.kind === 'wait' && !!task.roar;
+      return true;
+    };
+    const n = num('n', 3);
+    for (let i = 0; i < n; i++) {
+      let kong: Kong | undefined;
+      h.run(240000, { each: park, until: () => !!(kong = h.kongs().find(ready)) });
+      h.check(!!kong, `kong ${i}: up a building (${at})`);
+      if (!kong) return;
+      const from = kong.object.position.clone();
+      const yaw = h.kong(kong).yaw;
+      h.log(`kong ${i}: shot at ${from.x.toFixed(0)},${from.y.toFixed(0)},${from.z.toFixed(0)}`);
+      const side = yaw + Math.PI / 2;
+      const target = from.clone().setY(from.y / 2);
+      const dist = Math.max(250, from.y * 1.3);
+      h.look(`kong ${i}: shot`, Harness.middle(kong), 3 * kong.height, yaw + Math.PI);
+      kong.struck(h.world, { t: 0, point: Harness.middle(kong), normal: new THREE.Vector3(0, 0, 1) }, new THREE.Vector3(0, 0, -100), 100);
+      for (let f = 0; f < 3; f++) {
+        h.run(400, { each: park });
+        h.look(`kong ${i}: falling`, target, dist, side, 0.2);
+      }
+      const k = kong;
+      const down = (): boolean => (k as unknown as { landed: boolean }).landed;
+      h.run(15000, { each: park, until: down });
+      h.run(1500, { each: park });
+      const p = k.object.position;
+      const street = Math.min(Math.abs(p.x - Math.round(p.x / BLOCKSIZE) * BLOCKSIZE), Math.abs(p.z - Math.round(p.z / BLOCKSIZE) * BLOCKSIZE));
+      h.check(down() && Math.abs(p.y) < 1, `kong ${i}: down on the street (y=${p.y.toFixed(1)}, ${street.toFixed(0)} off the street's middle, ${h.when})`);
+      h.check(street < 45, `kong ${i}: in the street, not on a building`);
+      h.look(`kong ${i}: down`, p.clone().setY(10), 3 * k.height, side, 2);
     }
   },
 };

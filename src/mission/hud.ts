@@ -2,6 +2,7 @@
 // TurnBack, Tally, Banner, the FPS readout, and the "generating
 // skyscrapers" LoadBar.
 
+import * as THREE from 'three';
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
 import {
   Container2D, Drawable2D, Image, LEFT, Quad, Text2D, Transitional2D, textHeight, textWidth, type Batch2D, type Color, type Point,
@@ -106,6 +107,71 @@ export class LivesDisplay extends Drawable2D {
   }
 }
 
+/** A blonde's head, for her icons: a yellow circle with a 1930s wave of
+ *  golden hair, outlined dark so it shows on anything. Drawn into `g` round
+ *  (cx, cy), `r` the face's radius (the hair reaches about 1.5 r out). */
+export function drawBlondeHead(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+  const ink = '#2a1d08';
+  const hair = '#e8a818';
+  g.lineJoin = 'round';
+  g.lineWidth = Math.max(1.5, r * 0.16);
+  g.strokeStyle = ink;
+  // the hair behind: a rounded mass over the top, falling in curls to the jaw
+  const back = new Path2D();
+  back.moveTo(cx - 1.3 * r, cy + 0.9 * r);
+  back.bezierCurveTo(cx - 1.75 * r, cy - 0.2 * r, cx - 1.45 * r, cy - 1.45 * r, cx, cy - 1.45 * r);
+  back.bezierCurveTo(cx + 1.45 * r, cy - 1.45 * r, cx + 1.75 * r, cy - 0.2 * r, cx + 1.3 * r, cy + 0.9 * r);
+  back.bezierCurveTo(cx + 1.0 * r, cy + 1.25 * r, cx + 0.6 * r, cy + 0.9 * r, cx + 0.7 * r, cy + 0.5 * r);
+  back.lineTo(cx - 0.7 * r, cy + 0.5 * r);
+  back.bezierCurveTo(cx - 0.6 * r, cy + 0.9 * r, cx - 1.0 * r, cy + 1.25 * r, cx - 1.3 * r, cy + 0.9 * r);
+  back.closePath();
+  g.fillStyle = hair;
+  g.fill(back);
+  g.stroke(back);
+  // the face
+  g.beginPath();
+  g.arc(cx, cy + 0.1 * r, r, 0, Math.PI * 2);
+  g.fillStyle = '#ffe23a';
+  g.fill();
+  g.stroke();
+  // the fringe: waves swept across the forehead from a side parting
+  const fringe = new Path2D();
+  fringe.moveTo(cx - 1.1 * r, cy + 0.2 * r);
+  fringe.bezierCurveTo(cx - 1.2 * r, cy - 1.2 * r, cx + 0.3 * r, cy - 1.4 * r, cx + 1.1 * r, cy - 0.05 * r);
+  fringe.bezierCurveTo(cx + 0.75 * r, cy - 0.3 * r, cx + 0.45 * r, cy - 0.1 * r, cx + 0.15 * r, cy - 0.3 * r);
+  fringe.bezierCurveTo(cx - 0.15 * r, cy - 0.05 * r, cx - 0.5 * r, cy - 0.25 * r, cx - 0.7 * r, cy - 0.05 * r);
+  fringe.bezierCurveTo(cx - 0.85 * r, cy + 0.05 * r, cx - 0.95 * r, cy + 0.1 * r, cx - 1.1 * r, cy + 0.2 * r);
+  fringe.closePath();
+  g.fillStyle = hair;
+  g.fill(fringe);
+  g.stroke(fringe);
+  // eyes and a smile
+  g.fillStyle = ink;
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.arc(cx + s * 0.36 * r, cy + 0.22 * r, 0.11 * r, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.beginPath();
+  g.arc(cx, cy + 0.4 * r, 0.36 * r, 0.2 * Math.PI, 0.8 * Math.PI);
+  g.lineWidth = Math.max(1, r * 0.1);
+  g.stroke();
+}
+
+let blondeIcon: THREE.Texture | null = null;
+/** Her head alone, for the radar (flipY false, as draw2d wants). */
+export function blondeIconTexture(): THREE.Texture {
+  if (!blondeIcon) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    drawBlondeHead(c.getContext('2d')!, 32, 34, 19);
+    blondeIcon = new THREE.CanvasTexture(c);
+    blondeIcon.colorSpace = THREE.SRGBColorSpace;
+    blondeIcon.flipY = false;
+  }
+  return blondeIcon;
+}
+
 /** Something to show on the radar, in world coordinates. */
 /** A dot on the radar: a kong, or (`blonde`) one carrying a blonde, or
  *  a blonde falling. */
@@ -191,14 +257,12 @@ export class Radar extends Drawable2D {
       g.push();
       g.translate(px, py);
       if (b.kind === 'blonde') {
-        // a falling blonde: a bright diamond, blinking
-        if (blink || far) {
-          g.rotate(45);
-          g.quad(dot * 2.2, dot * 2.2, [1, 0.95, 0.55, alpha]);
-        }
+        // a falling blonde: her head, blinking
+        if (blink || far) g.quad(dot * 3.6, dot * 3.6, [1, 1, 1, alpha], blondeIconTexture());
       } else {
         g.quad(dot * 2, dot * 2, far ? [0.95, 0.55, 0.3, 0.7 * alpha] : [1, 0.4, 0.25, alpha]);
-        if (b.kind === 'carrying') g.quad(dot, dot, [1, 0.95, 0.55, alpha]);
+        // carrying one: her head on the kong's dot
+        if (b.kind === 'carrying') g.quad(dot * 2.6, dot * 2.6, [1, 1, 1, alpha], blondeIconTexture());
       }
       g.pop();
     }

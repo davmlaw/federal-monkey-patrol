@@ -116,6 +116,13 @@ const ROOF_MSECS: [number, number] = [5000, 10000];
 const PERCH_MSECS: [number, number] = [1500, 5000]; // a rooftop kong, between turns
 const GRAVITY = 400; // units/s^2, for falling off buildings
 const TOPPLE_MSECS = 1400; // falling over in the street
+// tumbling off a building, in heights: the middle of the body it turns
+// about (from the feet), and its radius for hitting things
+const TUMBLE_CENTRE = 0.42;
+const TUMBLE_RADIUS = 0.18;
+const TUMBLE_BOUNCE = 0.3; // of the speed into what it hits
+const TUMBLE_GIVE_UP = 10000; // msecs: then drops through anything in the way
+const SETTLE_MSECS = 350; // flattening out on the street
 const CORPSE_MSECS = 12000; // lies there this long...
 const SINK_MSECS = 3000; // ...then sinks into the street
 const HEARING = 3500; // roars fade out at this distance from the plane
@@ -134,11 +141,20 @@ export class Kong extends Entity {
   private dying = false;
   private fallT = 0;
   private fallTime = 0;
-  private fallFrom = new THREE.Vector3();
-  private fallTo = new THREE.Vector3();
   private fallSign = 1; // +1 onto its back, -1 on its face
   private landed = false;
   private corpse = 0;
+  // tumbling off a building (after being shot down up there)
+  private tumbling = false;
+  private fallVel = new THREE.Vector3();
+  private tumble = 0; // radians about its middle, + onto its back
+  private spin = 0; // radians per second
+  private streetAxis: 'x' | 'z' = 'x'; // the street it falls into runs along
+  private streetAt = 0; // ...the other axis, at this
+  private settleT = -1; // >= 0: down on the street, flattening out
+  private settleFrom = 0;
+  private settleTo = 0;
+  private settleY = 0;
   /** Where the roars are heard from (the plane). */
   ear: THREE.Object3D | null = null;
   /** The patrol area: it heads back in when it strays outside. */
@@ -240,8 +256,10 @@ export class Kong extends Entity {
     if (v > 0.03) playSound(this.roar, { volume: v });
   }
 
-  /** Shot down: lets go and falls (off the building, if it's on one) and
-   *  topples over; in the street, away from the shot (going at `shot`). */
+  /** Shot down: lets go and falls. In the street it topples over, away
+   *  from the shot (going at `shot`); up on a building it tumbles off,
+   *  bouncing down any ledges and setbacks in the way, out over the street
+   *  and down to it (see updateTumble). */
   private die(world: World, shot: THREE.Vector3): void {
     this.dying = true;
     this.tasks = [];
@@ -252,47 +270,143 @@ export class Kong extends Entity {
     const pos = this.object.position;
     const h = this.cfg.height;
     const back = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); // behind it
-    this.fallFrom.copy(pos);
-    this.fallTo.copy(pos);
     this.fallSign = 1;
+    this.pose.rotation.set(0, 0, 0);
     if (pos.y > 0.5) {
-      // away from the wall (or backwards), far enough to clear it
-      let out = back;
-      let clear = 0.35 * h;
-      if (this.wall) {
-        const w = this.wall;
-        out = new THREE.Vector3(w.nx, 0, w.nz);
-        clear -= pos.x * w.nx + pos.z * w.nz - w.d; // (it may be inside, on the roof)
-      }
-      this.fallTo.addScaledVector(out, Math.max(0, clear));
+      // the street to fall into: the one the wall it's on faces, or off a
+      // roof, the nearest
+      const near = (v: number): number => Math.round(v / BLOCKSIZE) * BLOCKSIZE;
+      let axis: 'x' | 'z';
+      if (this.wall) axis = Math.abs(this.wall.nx) > Math.abs(this.wall.nz) ? 'x' : 'z';
+      else axis = Math.abs(pos.x - near(pos.x)) < Math.abs(pos.z - near(pos.z)) ? 'x' : 'z';
+      this.streetAxis = axis;
+      this.streetAt = near(pos[axis]);
+      const out = new THREE.Vector3();
+      out[axis] = Math.sign(this.streetAt - pos[axis]) || 1;
       thrown = out;
       if (out.dot(back) < 0) this.fallSign = -1; // facing out: falls forward
-      // land on whatever is below: the street or a lower roof
-      const top = this.fallTo.clone().setY(pos.y - 0.5);
-      const hit = world.grid.sweep(top, this.fallTo.clone().setY(-10), 0);
-      this.fallTo.y = hit && hit.t > 0 ? hit.point.y : 0;
-      this.fallTime = Math.max(0.8, Math.sqrt(2 * Math.max(0, pos.y - this.fallTo.y) / GRAVITY)) * 1000;
+      // tumbles about its middle: object.position is that from now on
+      this.tumbling = true;
+      pos.y += TUMBLE_CENTRE * h;
+      this.tumble = 0;
+      this.spin = this.fallSign * rand(1.5, 2.6);
+      this.fallVel.copy(out).multiplyScalar(rand(0.6, 0.9) * h).setY(rand(0.2, 0.5) * h);
+      this.placeTumble();
     } else {
       this.fallTime = TOPPLE_MSECS;
       if (shot.x * back.x + shot.z * back.z < 0) this.fallSign = -1; // shot from behind
     }
-    this.pose.rotation.set(0, 0, 0);
     this.anim.rig.fallSign = this.fallSign;
     // she's let go (and up high, thrown clear of the roof)
     this.blonde?.drop(thrown);
     this.blonde = null;
   }
 
+  /** Turns the body `tumble` about its middle (object.position). */
+  private placeTumble(): void {
+    const c = TUMBLE_CENTRE * this.cfg.height;
+    this.pose.rotation.x = this.tumble;
+    this.pose.position.set(0, -c * Math.cos(this.tumble), -c * Math.sin(this.tumble));
+  }
+
+  /** Down onto the street (or the corpse lies wherever, after too long). */
+  private touchDown(world: World): void {
+    // onto its back or its face, whichever is nearer
+    const lie = Math.sin(this.tumble) >= 0 ? Math.PI / 2 : -Math.PI / 2;
+    this.fallSign = lie > 0 ? 1 : -1;
+    this.anim.rig.fallSign = this.fallSign;
+    this.settleFrom = this.tumble;
+    this.settleTo = lie + 2 * Math.PI * Math.round((this.tumble - lie) / (2 * Math.PI));
+    this.settleY = this.object.position.y;
+    this.settleT = 0;
+    this.fallVel.set(0, 0, 0);
+    const at = this.object.position.clone().setY(0);
+    world.effects.dust(at, 1.5);
+    playBang(1.4, 220, 0.8 * this.volume());
+  }
+
+  /** Falling off a building: a ballistic tumble that bounces off what it
+   *  hits, steered out over the middle of the street (so it never ends up
+   *  lying on a ledge or across a roof's edge). */
+  private updateTumble(world: World, msecs: number): void {
+    const pos = this.object.position;
+    const h = this.cfg.height;
+    const r = TUMBLE_RADIUS * h;
+    if (this.settleT >= 0) {
+      // down: flattening out on the street
+      this.settleT = Math.min(SETTLE_MSECS, this.settleT + msecs);
+      const k = this.settleT / SETTLE_MSECS;
+      const e = k * (2 - k);
+      this.tumble = THREE.MathUtils.lerp(this.settleFrom, this.settleTo, e);
+      pos.y = THREE.MathUtils.lerp(this.settleY, 0, e);
+      this.placeTumble();
+      this.anim.update(msecs / 1000, 'fall', 0, 1);
+      if (k >= 1) this.landed = true;
+      return;
+    }
+    this.fallT += msecs;
+    this.anim.update(msecs / 1000, 'fall', 0, Math.min(1, this.fallT / 700));
+    const lost = this.fallT > TUMBLE_GIVE_UP; // (stuck somewhere: just drop)
+    const v = this.fallVel;
+    const axis = this.streetAxis;
+    const other = axis === 'x' ? 'z' : 'x';
+    for (let left = msecs; left > 0;) {
+      const ms = Math.min(20, left);
+      left -= ms;
+      const dt = ms / 1000;
+      v.y -= GRAVITY * dt;
+      // out over the street and along it to the middle
+      const want = THREE.MathUtils.clamp(4 * (this.streetAt - pos[axis]), -1.5 * h, 1.5 * h);
+      v[axis] += (want - v[axis]) * Math.min(1, 3 * dt);
+      v[other] *= Math.max(0, 1 - 0.8 * dt);
+      this.tumble += this.spin * dt;
+      const next = pos.clone().addScaledVector(v, dt);
+      const hit = lost ? null : world.grid.sweep(pos, next, r);
+      if (lost && next.y <= r) {
+        pos.copy(next).setY(r);
+        this.touchDown(world);
+        break;
+      }
+      if (!hit || hit.t <= 1e-6) {
+        // (t 0: it starts inside a box, as it can on leaving a roof)
+        pos.copy(next);
+        continue;
+      }
+      pos.lerp(next, hit.t).addScaledVector(hit.normal, 0.01);
+      const n = hit.normal;
+      if (n.y > 0.5 && hit.point.y < 1) {
+        this.touchDown(world);
+        break;
+      }
+      // a wall, a ledge or a setback: bounce off it, limply, and roll on
+      const into = v.dot(n);
+      if (into < 0) v.addScaledVector(n, -(1 + TUMBLE_BOUNCE) * into);
+      if (n.y > 0.5) {
+        v[axis] += Math.sign(this.streetAt - pos[axis]) * 0.4 * h;
+        this.spin = -0.4 * this.spin + rand(-3, 3);
+        if (-into > 0.6 * h) {
+          world.effects.dust(hit.point, 0.6);
+          playBang(0.6, 300, 0.4 * this.volume());
+        }
+      } else {
+        this.spin += rand(-1.5, 1.5);
+      }
+      break;
+    }
+    this.placeTumble();
+  }
+
   private updateFall(world: World, msecs: number): void {
     const pos = this.object.position;
     if (!this.landed) {
+      if (this.tumbling) {
+        this.updateTumble(world, msecs);
+        return;
+      }
+      // toppling over in the street
       this.fallT = Math.min(this.fallTime, this.fallT + msecs);
       const k = this.fallT / this.fallTime;
-      const fromAir = this.fallFrom.y - this.fallTo.y > 1;
-      pos.x = THREE.MathUtils.lerp(this.fallFrom.x, this.fallTo.x, Math.min(1, k * 1.5));
-      pos.z = THREE.MathUtils.lerp(this.fallFrom.z, this.fallTo.z, Math.min(1, k * 1.5));
-      pos.y = THREE.MathUtils.lerp(this.fallFrom.y, this.fallTo.y, k * k); // (falling under gravity)
-      this.pose.rotation.x = this.fallSign * (Math.PI / 2) * (fromAir ? k : k * k);
+      this.pose.rotation.x = this.fallSign * (Math.PI / 2) * k * k;
       this.anim.update(msecs / 1000, 'fall', 0, k);
       if (k >= 1) {
         this.landed = true;

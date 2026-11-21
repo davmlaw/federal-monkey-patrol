@@ -9,6 +9,7 @@ import { loadModel, playChime, playScream } from '../core/assets.ts';
 import { settings } from '../core/settings.ts';
 import { gamestats, Stat } from './stats.ts';
 import { Entity, type World } from './world.ts';
+import { drawBlondeHead } from './hud.ts';
 import { euler, mirror, Rig, RigAnimator, type BoneDef } from './kongrig.ts';
 
 // ------------------------------------------------------------------ rig
@@ -178,21 +179,25 @@ const THROW_SLOW = 1.2; // 1/s: how fast that dies away
 type State = 'held' | 'falling' | 'caught' | 'landed';
 
 /** A marker over a blonde, so she's easy to find (carried off, or blinking
- *  as she falls): a ring and a chevron, the same size on screen at any
- *  distance. */
+ *  as she falls): a chevron pointing down at her and her head (the same
+ *  icon as on the radar), the same size on screen at any distance. */
 function markerTexture(): THREE.Texture {
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = 64;
+  c.height = 80;
   const g = c.getContext('2d')!;
+  drawBlondeHead(g, 32, 26, 15);
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(18, 58);
+  g.lineTo(32, 72);
+  g.lineTo(46, 58);
+  g.strokeStyle = '#2a1d08';
+  g.lineWidth = 9;
+  g.stroke();
   g.strokeStyle = '#fff';
   g.lineWidth = 5;
-  g.beginPath();
-  g.moveTo(14, 14);
-  g.lineTo(32, 34);
-  g.lineTo(50, 14);
-  g.stroke();
-  g.beginPath();
-  g.arc(32, 48, 9, 0, Math.PI * 2);
   g.stroke();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -220,7 +225,7 @@ export class Blonde extends Entity {
     object.add(pose);
     super(object);
     this.marker = new THREE.Sprite(kit.markerMaterial);
-    this.marker.scale.set(0.05, 0.05, 1);
+    this.marker.scale.set(0.06, 0.075, 1);
     this.marker.position.y = kit.cfg.height * 1.1;
     this.marker.renderOrder = 10;
     this.marker.visible = false;

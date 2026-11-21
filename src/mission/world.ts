@@ -3,7 +3,7 @@
 // CameraMan with its chase camera.
 
 import * as THREE from 'three';
-import { loadModel, loadTextureVariant, clampTexture } from '../core/assets.ts';
+import { loadModel, loadTextureVariant, clampTexture, playBang, playGunshot, playRicochet, playThud } from '../core/assets.ts';
 import { loadProperties } from '../core/settings.ts';
 import { Button, InputFilter, type Axis, type Input } from '../core/input.ts';
 import type { Display } from '../core/display.ts';
@@ -174,14 +174,18 @@ export class Projectile extends Entity {
 
   override hit(world: World, hit: Hit, velocity: THREE.Vector3, target: Entity | null = null): void {
     this.dead = true;
+    const volume = world.loudness(hit.point);
     if (this.bomb) {
       const at = hit.point.clone().addScaledVector(hit.normal, 2);
       world.effects.explosion(at, 0.5);
       world.blast(at, BOMB_BLAST_RADIUS, BOMB_DAMAGE, velocity);
+      if (volume > 0.01) playBang(1.2, 900, 0.7 * volume);
     } else if (target) {
       target.struck(world, hit, velocity, BULLET_DAMAGE);
+      playThud(0.45 * volume);
     } else {
       world.effects.sparks(hit.point, hit.normal, velocity);
+      playRicochet(0.3 * volume);
     }
   }
 
@@ -391,6 +395,7 @@ export class Plane extends Entity {
       bomb.bomb = this.firing === 2;
       world.addEntity(bomb);
     }
+    if (this.firing === 1) playGunshot();
     this.reloadTime = 75;
   }
 }
@@ -709,6 +714,9 @@ const FOG_START = 50.0;
 const FOG_END = 11000.0;
 export const FOG_COLOR: readonly [number, number, number] = [0.8, 0.8, 0.8];
 
+// sounds (bullet hits, bombs) fade out at this distance from the camera
+const HEARING_RANGE = 1800;
+
 export class World {
   scene = new THREE.Scene();
   entities: Entity[] = [];
@@ -726,6 +734,12 @@ export class World {
     this.scene.add(ambient, sun, sun.target);
     this.scene.add(grid.group, this.effects.group);
     this.camera = new THREE.PerspectiveCamera(FOV / 2, 4 / 3, NEAR_DIST, FAR_DIST);
+  }
+
+  /** How loud a sound at `point` is where the camera is (1 close by, 0
+   *  at HEARING_RANGE). */
+  loudness(point: THREE.Vector3): number {
+    return Math.max(0, 1 - this.camera.position.distanceTo(point) / HEARING_RANGE) ** 2;
   }
 
   addEntity(ent: Entity): void {
