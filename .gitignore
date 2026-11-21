@@ -26,3 +26,6 @@ doc/html/
 # Web build
 node_modules/
 dist/
+
+# Harness screenshots (tools/shoot.mjs)
+shots/

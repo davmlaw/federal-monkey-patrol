@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>Game Test Harness</title>
+    <!-- Dev only (not in the build): see src/gametest.ts and tools/shoot.mjs. -->
+    <style>
+      body { margin: 0; background: #222; color: #ddd; font: 11px sans-serif; }
+      #shots { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
+      figure { margin: 0; }
+      figcaption { padding: 2px 0; }
+      #log { font: 11px monospace; padding: 4px; white-space: pre-wrap; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen" width="640" height="480"></canvas>
+    <div id="shots"></div>
+    <pre id="log"></pre>
+    <script type="module" src="/src/gametest.ts"></script>
+  </body>
+</html>

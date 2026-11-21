@@ -16,7 +16,10 @@ The main version is now a browser port (Vite + Three.js, TypeScript) deployed to
 - `kongtest.html` (`src/kongtest.ts`, also built and deployed, linked from the menu's extras) is a test page for the kong's and blonde's animations: the clips on a moving ground and a sliding wall, the kong carrying a blonde, with the skeleton and skin weights (lil-gui), plus URL parameters for a contact sheet of a cycle (`?sheet=walk&views=side,front`, `?model=blonde&sheet=held`, `?carry=1&sheet=roar&zoom=4`), handy for checking poses in a headless browser.
 - `?game=<path>` picks the `.game` file (default: `default_game` in `data/etc/main.properties`). The page always starts at a menu, because browsers need a click before audio can play.
 - Deploy: `.github/workflows/pages.yml` builds and deploys to Pages on every push to `main`.
-- There are no tests beyond the type check. Check changes by running the game; a headless browser needs WebGL (e.g. Chromium with `--use-angle=swiftshader`).
+- There are no unit tests beyond the type check; check changes by running the game, headless with the harness:
+  - `npm run shoot -- <page> [<page> ...]` (`tools/shoot.mjs`) starts the Vite dev server, opens each page in headless Chromium (playwright-core's chrome-headless-shell from `~/.cache/ms-playwright`, software WebGL), waits for it to finish, saves a full-page screenshot in `shots/` (git-ignored) and prints the page's console. It exits non-zero on a page error, a timeout or a failed check. Options: `--out`, `--timeout`, `--wait` (for pages that never say they're done), `--size`.
+  - `gametest.html` (`src/gametest.ts`, dev only, not built) loads a mission without the menu and runs a scenario in game time (much faster than real time), laying out snapshots and a log: `?scenario=hud|kongs|blonde`, `mission=<file>`, `secs=`, `set=kong.climb_chance=1` (any setting, repeatable) and the scenario's own (`blonde&catch=1`). `Harness` has `run()` (step the game, with `each`/`until`), `snap()`/`look()` (the world from a free camera), `frame()` (what the player sees, HUD included), `check()` (pass/fail), and casts for the private bits scenarios poke at. Add a scenario to `SCENARIOS` for each new feature worth seeing.
+  - `kongtest.html?sheet=...` contact sheets work the same way (`npm run shoot -- 'kongtest.html?model=blonde&sheet=fall'`).
 
 ## Architecture (`src/`)
 
