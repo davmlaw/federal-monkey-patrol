@@ -1,6 +1,6 @@
 // Kongs: giant apes (King Kong size) that walk the streets, now and then
-// climb a building to roar from its roof, and can be shot down. The model
-// has no animation, so they waddle, sway and topple as a whole.
+// climb a building to roar from its roof, and can be shot down. They're
+// rigged and animated procedurally in kongrig.ts (see kongtest.html).
 // Tuned in data/etc/kong.properties.
 
 import * as THREE from 'three';
@@ -9,6 +9,7 @@ import { settings } from '../core/settings.ts';
 import { gamestats, Stat } from './stats.ts';
 import { BLOCKSIZE, type Hit } from './city.ts';
 import { Entity, type World } from './world.ts';
+import { FALL_SETTLE, KongAnimator, KongRig, type KongClip } from './kongrig.ts';
 
 interface KongConfig {
   model: string;
@@ -116,6 +117,8 @@ const TOPPLE_MSECS = 1400; // falling over in the street
 const CORPSE_MSECS = 12000; // lies there this long...
 const SINK_MSECS = 3000; // ...then sinks into the street
 const HEARING = 3500; // roars fade out at this distance from the plane
+const CLIMB_OFF = 0.22; // stands this far (in heights) out from a wall to climb it
+const TURN_STEP = 0.2; // turning on the spot, the feet step as if walking this far (in heights) per radian
 
 export class Kong extends Entity {
   private yaw = 0;
@@ -124,7 +127,6 @@ export class Kong extends Entity {
   private wall: Wall | null = null;
   private health: number;
   private flash = 0;
-  private phase = 0; // waddle / sway
   private roared = false;
   // falling (after being shot down)
   private dying = false;
@@ -143,7 +145,9 @@ export class Kong extends Entity {
   perched = false;
 
   constructor(
-    private pose: THREE.Group, // waddles and topples, pivoting at the feet
+    private pose: THREE.Group, // topples, pivoting at the feet
+    private anim: KongAnimator,
+    private scale: number, // world units per model unit
     private material: THREE.MeshLambertMaterial,
     private cfg: KongConfig,
     private roar: AudioBuffer | null,
@@ -171,16 +175,17 @@ export class Kong extends Entity {
 
   // ------------------------------------------------------------- shooting
 
-  /** The hit capsule, in world space: an axis from hips to head, and a
-   *  radius that takes in most of the arms. */
+  /** The hit capsule, in world space: an axis from below the hips to the
+   *  neck (following the body as it climbs and falls), and a radius that
+   *  takes in most of the arms. */
   private capsule(): { a: THREE.Vector3; b: THREE.Vector3; r: number } {
     const h = this.cfg.height;
-    this.object.updateMatrixWorld();
-    return {
-      a: this.pose.localToWorld(new THREE.Vector3(0, 0.2 * h, 0)),
-      b: this.pose.localToWorld(new THREE.Vector3(0, 0.75 * h, 0)),
-      r: 0.2 * h,
-    };
+    this.object.updateMatrixWorld(true);
+    const bones = this.anim.rig.bones;
+    const a = bones.get('hips')!.getWorldPosition(new THREE.Vector3());
+    const b = bones.get('neck')!.getWorldPosition(new THREE.Vector3());
+    a.add(a.clone().sub(b).setLength(0.15 * h));
+    return { a, b, r: 0.2 * h };
   }
 
   override intersect(p0: THREE.Vector3, p1: THREE.Vector3, radius: number): Hit | null {
@@ -262,7 +267,7 @@ export class Kong extends Entity {
       if (shot.x * back.x + shot.z * back.z < 0) this.fallSign = -1; // shot from behind
     }
     this.pose.rotation.set(0, 0, 0);
-    this.pose.position.set(0, 0, 0);
+    this.anim.rig.fallSign = this.fallSign;
   }
 
   private updateFall(world: World, msecs: number): void {
@@ -275,6 +280,7 @@ export class Kong extends Entity {
       pos.z = THREE.MathUtils.lerp(this.fallFrom.z, this.fallTo.z, Math.min(1, k * 1.5));
       pos.y = THREE.MathUtils.lerp(this.fallFrom.y, this.fallTo.y, k * k); // (falling under gravity)
       this.pose.rotation.x = this.fallSign * (Math.PI / 2) * (fromAir ? k : k * k);
+      this.anim.update(msecs / 1000, 'fall', 0, k);
       if (k >= 1) {
         this.landed = true;
         // where its back (or front) hits the street
@@ -285,6 +291,7 @@ export class Kong extends Entity {
       return;
     }
     this.corpse += msecs;
+    if (this.corpse < FALL_SETTLE * 1000 + 100) this.anim.update(msecs / 1000, 'fall', 0, 1 + Math.min(FALL_SETTLE, this.corpse / 1000));
     if (this.corpse > CORPSE_MSECS) {
       pos.y -= (0.3 * this.cfg.height) * msecs / SINK_MSECS;
       if (this.corpse > CORPSE_MSECS + SINK_MSECS) {
@@ -308,7 +315,10 @@ export class Kong extends Entity {
     const dt = msecs / 1000;
     const pos = this.object.position;
     const task = this.tasks[0];
-    let moving: 'walk' | 'climb' | 'roar' | null = null;
+    const yaw0 = this.yaw;
+    const y0 = pos.y;
+    let clip: KongClip = 'idle';
+    let travel = 0; // in world units, forward or up
     let done = false;
     switch (task.kind) {
       case 'walk':
@@ -332,7 +342,8 @@ export class Kong extends Entity {
             pos.x += dx / dist * step;
             pos.z += dz / dist * step;
           }
-          moving = 'walk';
+          clip = 'walk';
+          travel = Math.min(step, dist);
         }
         break;
       }
@@ -347,7 +358,8 @@ export class Kong extends Entity {
         const step = this.cfg.climbSpeed * dt;
         pos.y = Math.abs(dy) <= step ? task.y : pos.y + Math.sign(dy) * step;
         done = pos.y === task.y;
-        moving = 'climb';
+        clip = 'climb';
+        travel = pos.y - y0;
         break;
       }
       case 'wait':
@@ -357,7 +369,7 @@ export class Kong extends Entity {
         }
         task.msecs -= msecs;
         done = task.msecs <= 0;
-        if (task.roar) moving = 'roar';
+        if (task.roar) clip = 'roar';
         break;
       case 'wall':
         this.wall = task.wall;
@@ -369,35 +381,18 @@ export class Kong extends Entity {
       this.roared = false;
     }
     this.object.rotation.set(0, this.yaw, 0);
-    this.animate(moving, dt);
+    // turning on the spot: stepping round
+    const turned = Math.abs(angleTo(yaw0, this.yaw));
+    if (clip === 'idle' && turned > 1e-4) {
+      clip = 'walk';
+      travel = turned * TURN_STEP * this.cfg.height;
+    }
+    this.anim.update(dt, clip, travel / this.scale);
   }
 
   private turn(diff: number, dt: number): void {
     const step = TURN_RATE * dt;
     this.yaw += Math.abs(diff) <= step ? diff : Math.sign(diff) * step;
-  }
-
-  /** No animation in the model, so the whole of it waddles as it walks,
-   *  sways as it climbs and bounces as it beats its chest. */
-  private animate(moving: 'walk' | 'climb' | 'roar' | null, dt: number): void {
-    const h = this.cfg.height;
-    const p = this.pose;
-    if (moving === 'walk') {
-      this.phase += dt * Math.PI * this.cfg.walkSpeed / (0.3 * h);
-      p.rotation.z = Math.sin(this.phase) * 0.08;
-      p.position.y = Math.abs(Math.sin(this.phase)) * 0.03 * h;
-    } else if (moving === 'climb') {
-      this.phase += dt * Math.PI * this.cfg.climbSpeed / (0.25 * h);
-      p.rotation.z = Math.sin(this.phase) * 0.06;
-      p.position.y = 0;
-    } else if (moving === 'roar') {
-      this.phase += dt * 14;
-      p.rotation.z = Math.sin(this.phase) * 0.04;
-      p.position.y = Math.abs(Math.sin(this.phase)) * 0.015 * h;
-    } else {
-      p.rotation.z *= 1 - Math.min(1, dt * 8);
-      p.position.y *= 1 - Math.min(1, dt * 8);
-    }
   }
 
   /** At a crossing with nothing to do: maybe climb a building on one of
@@ -466,14 +461,14 @@ export class Kong extends Entity {
             // somewhere to stand on the roof
             const depth = [0.25 * h, 0.12 * h, 0].find((d) => !world.grid.sweep(at(-d, b.y1 + 1), at(-d, b.y1 + 0.8 * h), 0));
             if (depth === undefined) continue;
-            const foot = at(0.22 * h, 0);
+            const foot = at(CLIMB_OFF * h, 0);
             const roof = at(-depth, 0);
             climbs.push({
               street: axis === 0 ? [street, lateral] : [lateral, street],
               foot: [foot.x, foot.z],
               roof: [roof.x, roof.z],
               top: b.y1,
-              wall: { nx, nz, d: nx * foot.x + nz * foot.z - 0.22 * h },
+              wall: { nx, nz, d: nx * foot.x + nz * foot.z - CLIMB_OFF * h },
             });
           }
         }
@@ -587,14 +582,16 @@ export class KongTroop {
     if (!geom.boundingBox) geom.computeBoundingBox();
     const box = geom.boundingBox!;
     const material = (this.proto.material as THREE.MeshLambertMaterial).clone();
-    const mesh = new THREE.Mesh(geom, material);
+    const rig = new KongRig(geom, material);
+    const mesh = rig.mesh;
     const scale = this.cfg.height / (box.max.y - box.min.y);
+    rig.wallZ = CLIMB_OFF * (box.max.y - box.min.y);
     mesh.scale.setScalar(scale);
     mesh.rotation.y = Math.PI; // the model faces +Z; forward is -Z
     mesh.position.y = -box.min.y * scale; // feet on the ground
     const pose = new THREE.Group();
     pose.add(mesh);
-    return new Kong(pose, material, this.cfg, this.roar);
+    return new Kong(pose, new KongAnimator(rig), scale, material, this.cfg, this.roar);
   }
 
   /** A crossing in the patrol area, not too near the plane and away from

@@ -34,7 +34,11 @@ export default defineConfig({
   },
   base: './',
   publicDir: false,
-  build: { chunkSizeWarningLimit: 1000 },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    // the game, and the test page for the kongs' animations
+    rolldownOptions: { input: ['index.html', 'kongtest.html'] },
+  },
   plugins: [copyGameData()],
   server: { watch: { ignored: ['**/legacy/**'] } },
 });
