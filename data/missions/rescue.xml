@@ -2,8 +2,9 @@
 <!-- The story's last mission, the climax: Monkey Mayhem with blondes and
      against the clock. Forty kongs all round the plane wherever it flies
      (no patrol area or radar), quick to be replaced, carrying blondes off
-     up the towers. Catch three and down fifteen kongs in three minutes;
-     let one land, or run out of time, and it's game over. -->
+     up the towers, and throwing bananas at the plane. Catch three and
+     down five kongs in three minutes; let one land, or run out of time,
+     and it's game over. -->
 <mission>
 
 <startconditions>
@@ -16,6 +17,8 @@
   <blondes grab_chance="1" max="4">on</blondes>
   <patrolradius>none</patrolradius>
   <radar>off</radar>
+  <!-- not too many: with forty about, plenty are on screen at once -->
+  <bananas every_msecs="5000" rise_secs="2" range="1000" hit_radius="12">on</bananas>
   <countdown>
     <label>Time remaining</label>
     <seconds>180</seconds>
@@ -27,12 +30,12 @@
     <condition>
       <and>
         <stat name="blonde_rescues" op="gte" value="3" />
-        <stat name="monkey_deaths" op="gte" value="15" />
+        <stat name="monkey_deaths" op="gte" value="5" />
       </and>
     </condition>
     <result>
       <value>next</value>
-      <message>Three blondes saved, fifteen kongs down! The city is yours, Harlow.</message>
+      <message>Three blondes saved, five kongs down! The city is yours, Harlow.</message>
     </result>
   </scenario>
   <scenario>

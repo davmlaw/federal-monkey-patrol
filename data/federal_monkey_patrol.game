@@ -100,7 +100,7 @@ transition fade 500
 ################################
 # the climax: Monkey Mayhem with blondes, against the clock: lose one and it's over
 
-card 2400 Mayhem!|Save 3 Blondes|Lose None|Kill 15 Kongs
+card 2400 Mayhem!|Save 3 Blondes|Lose None|Kill 5 Kongs
 transition fade 600
 mission rescue.xml
 transition fade 1000
