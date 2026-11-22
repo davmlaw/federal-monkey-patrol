@@ -481,9 +481,11 @@ export class Banner extends Drawable2D {
     this.line.position.y = -0.05;
   }
 
+  /** `title`: '' for none. Each line is shrunk to fit the screen. */
   set(title: string, line: string): void {
-    for (const [t, s] of [[this.title, title], [this.line, line]] as const) {
+    for (const [t, s, font] of [[this.title, title, 0.5], [this.line, line, 0.22]] as const) {
       t.text = s;
+      t.font = Math.min(font, (ORTHO_W * 0.9) / Math.max(1e-6, textWidth(s)));
       t.setWidth(textWidth(s) * t.font);
       t.setHeight(textHeight(s) * t.font);
     }

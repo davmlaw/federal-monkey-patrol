@@ -468,8 +468,9 @@ export class Mission extends GameComponent {
     this.outMessageMsecs = OUT_MESSAGE_MSECS;
   }
 
-  /** An outcome's result: show `message` (and how it went), then take
-   *  `status`. Once only. */
+  /** An outcome's result: show how it went (and, unless it's a success,
+   *  `message` over it in yellow; the menu shows the message either way),
+   *  then take `status`. Once only. */
   finish(status: Status, message: string): void {
     if (this.ending || this.status !== Status.PLAYING) return;
     if (status === Status.PLAYING) return;
@@ -478,7 +479,7 @@ export class Mission extends GameComponent {
     this.outside = 0;
     lastResult.title = message;
     lastResult.line = summary();
-    this.banner.set(message, lastResult.line);
+    this.banner.set(status === Status.NEXT ? '' : message, lastResult.line);
   }
 
   private draw(display: Display, msecs: number): void {

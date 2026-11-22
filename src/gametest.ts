@@ -7,7 +7,7 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover, bananas, pointer
+//                     blonde, icons, kongfall, gameover, bananas, pointer, win
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -206,6 +206,20 @@ const SCENARIOS: Record<string, Scenario> = {
     h.check(!!h.internals.pointer!.behind, 'it says behind');
     place('far off', 0, h.internals.pointerRange + 1500);
     h.check(!h.internals.pointer!.dir, 'no arrow when it is far off');
+  },
+
+  /** Shoot every kong down at once and show the mission's ending (use a
+   *  mission with a fixed number, e.g. killmonkeys.xml). */
+  win(h) {
+    h.plane.charmed = true;
+    h.run(3000);
+    for (const kong of h.kongs()) {
+      kong.struck(h.world, { t: 0, point: Harness.middle(kong), normal: new THREE.Vector3(0, 0, 1) }, new THREE.Vector3(0, 0, -100), 100);
+    }
+    h.run(500);
+    h.frame('just won', 10, 30);
+    h.run(2000);
+    h.frame('a little later', 3, 30);
   },
 
   /** Fly straight on for `secs`, a full frame (with the HUD) each second. */
