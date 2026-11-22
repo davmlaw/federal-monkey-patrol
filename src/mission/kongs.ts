@@ -573,6 +573,16 @@ export class Kong extends Entity {
     this.yaw += Math.abs(diff) <= step ? diff : Math.sign(diff) * step;
   }
 
+  /** Start out halfway up a tall building on a corner of the crossing
+   *  (x, z), climbing on up it (and, if there's one to be had, reaching in
+   *  at a window there for a blonde first). False (and standing at the
+   *  crossing) if there's none to climb. */
+  startMidway(world: World, x: number, z: number): boolean {
+    this.placeAt(x, z);
+    const grab = !!this.kit && Math.random() < this.kit.cfg.grabChance && this.kit.canKidnap();
+    return this.planClimb(world, x, z, grab, true);
+  }
+
   /** At a crossing with nothing to do: maybe climb a building on one of
    *  its corners, otherwise walk on along one of the streets. */
   private plan(world: World): void {
@@ -619,12 +629,15 @@ export class Kong extends Entity {
    *  With a blonde, or to `grab` one, it wants a tall one instead, and
    *  climbs on up any setbacks above it to the top of the tower: grabbing
    *  her at a window a few storeys up on the way, staying longer on the
-   *  roof, then climbing back down with her. */
-  private planClimb(world: World, x: number, z: number, grab: boolean): boolean {
+   *  roof, then climbing back down with her.
+   *
+   *  `midway`: it's already halfway up (placed there now), and goes on up
+   *  from there (reaching in for her there, with `grab`). */
+  private planClimb(world: World, x: number, z: number, grab: boolean, midway = false): boolean {
     const h = this.cfg.height;
     const half = BLOCKSIZE / 2;
-    const tall = grab || !!this.blonde;
-    const minTop = tall && this.kit ? this.kit.cfg.minTop : 0;
+    const tall = grab || midway || !!this.blonde;
+    const minTop = !this.kit || !tall ? 0 : midway ? this.kit.cfg.spawnClimbingTop : this.kit.cfg.minTop;
     const climbs: Climb[] = [];
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
@@ -698,16 +711,27 @@ export class Kong extends Entity {
     const first = c.stages[0];
     const last = c.stages[c.stages.length - 1];
     const toWall = headingOf(-first.wall.nx, -first.wall.nz);
-    this.tasks.push(
-      { kind: 'walk', x: c.street[0], z: c.street[1] },
-      { kind: 'walk', x: first.foot[0], z: first.foot[1] },
-      { kind: 'turn', yaw: toWall },
-    );
+    // starting halfway up: on the stage that reaches that high
+    const mid = midway ? c.top / 2 : 0;
+    const from = midway ? Math.max(0, c.stages.findIndex((st) => st.y1 > mid)) : 0;
+    if (midway) {
+      const st = c.stages[from];
+      this.placeAt(st.foot[0], st.foot[1], toWall, Math.max(st.y0, mid));
+    } else {
+      this.tasks.push(
+        { kind: 'walk', x: c.street[0], z: c.street[1] },
+        { kind: 'walk', x: first.foot[0], z: first.foot[1] },
+        { kind: 'turn', yaw: toWall },
+      );
+    }
     // up, stage by stage
     c.stages.forEach((st, i) => {
-      if (i > 0) this.tasks.push({ kind: 'step', x: st.foot[0], z: st.foot[1] });
+      if (i < from) return;
+      if (i > from) this.tasks.push({ kind: 'step', x: st.foot[0], z: st.foot[1] });
       this.tasks.push({ kind: 'wall', wall: st.wall });
-      if (i === 0 && grab) {
+      if (midway && grab && i === from) {
+        this.tasks.push({ kind: 'grab', msecs: 0 }); // at a window right there
+      } else if (i === 0 && grab) {
         // a window a few storeys up, at about chest height
         const y = rand(10, Math.min(60, st.y1 - 0.9 * h));
         if (y > 5) this.tasks.push({ kind: 'climb', y }, { kind: 'grab', msecs: 0 });
@@ -1105,7 +1129,17 @@ export class KongTroop {
       kong.placeAt(roof[0], roof[2], Math.random() * Math.PI * 2, roof[1]);
       kong.perched = true;
     } else {
-      kong.placeAt(...this.spawnPoint(player));
+      const [x, z] = this.spawnPoint(player);
+      // with blondes about, some start halfway up a skyscraper (at one of
+      // a few crossings: not all have one tall enough)
+      let up = false;
+      if (this.blondes && Math.random() < this.blondes.cfg.spawnClimbing) {
+        for (let i = 0; i < 6 && !up; i++) {
+          const [cx, cz] = i ? this.spawnPoint(player) : [x, z];
+          up = kong.startMidway(world, cx, cz);
+        }
+      }
+      if (!up) kong.placeAt(x, z);
     }
     this.kongs.push(kong);
     world.addEntity(kong);

@@ -7,7 +7,8 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover, bananas, pointer, win, reach
+//                     blonde, icons, kongfall, gameover, bananas, pointer, win, reach,
+//                     midway
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -308,6 +309,32 @@ const SCENARIOS: Record<string, Scenario> = {
         h.look(`kong ${i} ${ki.tasks[0]?.kind ?? ''}${k.blonde ? ' +blonde' : ''}`, Harness.middle(k), 3 * k.height, ki.yaw + Math.PI);
       }
     }
+  },
+
+  /** Kongs that start halfway up a skyscraper (blondes' spawn_climbing,
+   *  made certain with set=blonde.spawn_climbing=1): after the first frame,
+   *  how many are up a wall and how high, each close up, then again after
+   *  `secs` (default 8). */
+  midway(h) {
+    h.plane.charmed = true;
+    const report = (when: string): number => {
+      let up = 0;
+      for (const [i, k] of h.kongs().entries()) {
+        const ki = h.kong(k);
+        const p = k.object.position;
+        if (p.y > 30) up++;
+        h.log(`${when}: kong ${i} at y=${p.y.toFixed(0)}${k.blonde ? ' +blonde' : ''} ${ki.tasks.slice(0, 4).map((x) => x.kind).join(',')}`);
+        // (from behind it: up a wall it faces the wall)
+        if (i < 6) h.look(`${when}: kong ${i} ${ki.tasks[0]?.kind ?? ''}${k.blonde ? ' +blonde' : ''}`, Harness.middle(k), 4 * k.height, ki.yaw + (p.y > 30 ? 0.3 : Math.PI), 0.2);
+      }
+      return up;
+    };
+    h.run(50);
+    const up = report('start');
+    h.log(`${up} of ${h.kongs().length} start up a building`);
+    h.check(up > 0, 'some kongs start halfway up a building');
+    h.run(num('secs', 8) * 1000);
+    report('later');
   },
 
   /** A kong grabs a blonde, climbs a tower and is shot on top; she falls
