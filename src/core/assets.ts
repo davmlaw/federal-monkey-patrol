@@ -175,22 +175,33 @@ export function loadSound(path: string): Promise<AudioBuffer | null> {
   return bufferCache.get(path)!;
 }
 
+const BASS_HZ = 250;
+
 export interface SoundHandle { done: boolean; stop(): void }
 
-/** Play a decoded buffer. Returns a handle whose .done turns true at the end. */
-export function playSound(buffer: AudioBuffer | null, { loop = false, volume = 1 } = {}): SoundHandle {
+/** Play a decoded buffer. Returns a handle whose .done turns true at the end.
+ *  `rate` < 1 plays it slower and deeper; `bassDb` boosts below `BASS_HZ`. */
+export function playSound(buffer: AudioBuffer | null, { loop = false, volume = 1, rate = 1, bassDb = 0 } = {}): SoundHandle {
   const handle: SoundHandle = { done: true, stop() {} };
   if (!audioCtx || !buffer) return handle;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.loop = loop;
-  if (volume === 1) {
-    src.connect(audioCtx.destination);
-  } else {
+  src.playbackRate.value = rate;
+  let out: AudioNode = src;
+  if (bassDb) {
+    const shelf = audioCtx.createBiquadFilter();
+    shelf.type = 'lowshelf';
+    shelf.frequency.value = BASS_HZ;
+    shelf.gain.value = bassDb;
+    out = out.connect(shelf);
+  }
+  if (volume !== 1) {
     const gain = audioCtx.createGain();
     gain.gain.value = volume;
-    src.connect(gain).connect(audioCtx.destination);
+    out = out.connect(gain);
   }
+  out.connect(audioCtx.destination);
   handle.done = false;
   src.onended = () => { handle.done = true; };
   handle.stop = () => { try { src.stop(); } catch { /* already stopped */ } handle.done = true; };

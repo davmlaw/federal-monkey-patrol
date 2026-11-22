@@ -12,10 +12,10 @@
   </model>
   <view>topdown</view>
   <controls>steer</controls>
-  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="1500" health_min="2" health_max="4">30</kongs>
+  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="2500" health_min="1" health_max="3">22</kongs>
   <!-- every kong in range and on screen throws one this often, at where
        the plane will be when it reaches the top of its arc -->
-  <bananas every_msecs="1800" rise_secs="1.5">on</bananas>
+  <bananas every_msecs="2400" rise_secs="1.8" hit_radius="13">on</bananas>
   <patrolradius>none</patrolradius>
   <!-- the kongs close round the plane's path, so they come on screen -->
   <roamradius>1200</roamradius>

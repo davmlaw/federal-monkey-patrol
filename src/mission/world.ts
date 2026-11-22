@@ -163,6 +163,8 @@ export class Projectile extends Entity {
    * down onto the first one ahead of it so it looks that way too.
    */
   flat = false;
+  /** A flat bullet goes this far over the map (world units) and is gone. */
+  range = Infinity;
 
   constructor(ptype: ProjectileType) {
     // (a type with no drawable throws here, as it always has)
@@ -213,6 +215,8 @@ export class Projectile extends Entity {
       if (!e.shootable || e.isDead()) continue;
       const a = e.aim();
       if (!a) continue;
+      const ndc = a.point.clone().project(world.camera);
+      if (ndc.z > 1 || Math.abs(ndc.x) > VIEW_MARGIN || Math.abs(ndc.y) > VIEW_MARGIN) continue;
       const rx = a.point.x - p.x;
       const rz = a.point.z - p.z;
       const side = Math.abs(rx * dz - rz * dx);
@@ -238,6 +242,8 @@ export class Projectile extends Entity {
     }
     p.x += dx * step;
     p.z += dz * step;
+    this.range -= step;
+    if (this.range <= 0) this.dead = true;
     this._update(world, msecs);
   }
 
@@ -254,6 +260,13 @@ export class Projectile extends Entity {
 // plane outran at any speed, so they never reached the buildings.)
 const BULLET_SPEED = 1500;
 const BULLET_MSECS = 1000;
+// Top-down bullets only hit what's on screen or a little past its edge
+// (VIEW_MARGIN: 1 is the edge, in half-screens from the middle), so they
+// can't clear kongs before they're seen, and go out of sight after
+// FLAT_BULLET_RANGE (the screen's top edge is some 300-500 ahead, by how
+// far below the plane the roofs are).
+const VIEW_MARGIN = 1.15;
+const FLAT_BULLET_RANGE = 650;
 
 // The guns: this far either side of the plane's middle, and ahead of it
 // (its wings span about 8).
@@ -392,6 +405,7 @@ export class Plane extends Entity {
         bomb.velocity.applyQuaternion(this.object.quaternion).setY(0);
         bomb.flat = true;
         bomb.radius = null; // over the buildings, not into them
+        bomb.range = FLAT_BULLET_RANGE;
       }
       bomb.setLifetime(this.firing === 1 ? BULLET_MSECS : 5000);
       bomb.bomb = this.firing === 2;

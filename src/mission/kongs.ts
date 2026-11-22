@@ -24,6 +24,8 @@ interface KongConfig {
   healthMin: number;
   healthMax: number;
   respawnMsecs: number;
+  roarPitch: number; // playback rate of the roar (lower is deeper)
+  roarBassDb: number; // boost below 250 Hz
 }
 
 function loadConfig(): KongConfig {
@@ -44,6 +46,8 @@ function loadConfig(): KongConfig {
     healthMin: f('health_min', 5),
     healthMax: f('health_max', 10),
     respawnMsecs: f('respawn_msecs', 8000),
+    roarPitch: f('roar_pitch', 0.8),
+    roarBassDb: f('roar_bass_db', 12),
   };
 }
 
@@ -270,7 +274,7 @@ export class Kong extends Entity {
 
   private bellow(): void {
     const v = this.volume();
-    if (v > 0.03) playSound(this.roar, { volume: v });
+    if (v > 0.03) playSound(this.roar, { volume: v, rate: this.cfg.roarPitch, bassDb: this.cfg.roarBassDb });
   }
 
   /** Shot down: lets go and falls. In the street it topples over, away

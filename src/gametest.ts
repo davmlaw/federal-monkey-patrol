@@ -7,7 +7,7 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover, bananas, pointer, win
+//                     blonde, icons, kongfall, gameover, bananas, pointer, win, reach
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -21,13 +21,13 @@ import * as THREE from 'three';
 import { display } from './core/display.ts';
 import { settings } from './core/settings.ts';
 import { loadFont } from './core/draw2d.ts';
-import { Input } from './core/input.ts';
+import { Button, Input } from './core/input.ts';
 import { Mission } from './mission/mission.ts';
 import { gamestats, Stat } from './mission/stats.ts';
 import type { Kong, Area } from './mission/kongs.ts';
 import { BLOCKSIZE } from './mission/city.ts';
 import { blondeIconTexture, KissPop } from './mission/hud.ts';
-import type { World, Plane } from './mission/world.ts';
+import { Projectile, type World, type Plane } from './mission/world.ts';
 
 const params = new URLSearchParams(location.search);
 const num = (k: string, d: number): number => {
@@ -171,6 +171,67 @@ const SCENARIOS: Record<string, Scenario> = {
     h.check(gamestats.get(Stat.PLAYER_DEATHS) > 0, 'a banana brings the plane down when it flies straight on');
   },
 
+  /** Top-down bullets' reach (use mission=survive1.xml or another top-down
+   *  one): holds fire for `secs` (default 10), drawing every step, and
+   *  measures how far ahead of the plane (over the map) the bullets get,
+   *  against where the top edge of the screen is at the height of the
+   *  kongs' heads and feet. Checks they get past the edge, but not far,
+   *  and that no kong is hit off screen. */
+  reach(h) {
+    if (!h.plane.flatShots) throw new Error('not a top-down mission (try mission=survive1.xml)');
+    h.input.setButton(Button.FIRE1, true);
+    // note where each kong is (in the view) when it's hit
+    let offscreen = 0;
+    let hits = 0;
+    const wrapped = new WeakSet<Kong>();
+    const watch = (): void => { for (const k of h.kongs()) if (!wrapped.has(k)) {
+      wrapped.add(k);
+      const struck = k.struck.bind(k);
+      k.struck = (...args) => {
+        const ndc = Harness.middle(k).project(h.world.camera);
+        hits++;
+        if (Math.abs(ndc.x) > 1.25 || Math.abs(ndc.y) > 1.25) offscreen++;
+        struck(...args);
+      };
+    } };
+    const secs = num('secs', 10);
+    let far = 0;
+    const edge = (y: number): number => {
+      // where the ray through the top middle of the screen meets height y
+      const cam = h.world.camera;
+      cam.updateMatrixWorld();
+      const o = cam.position.clone();
+      const d = new THREE.Vector3(0, 1, 0.5).unproject(cam).sub(o).normalize();
+      const at = o.addScaledVector(d, (y - o.y) / d.y);
+      const p = h.plane.object.position;
+      return Math.hypot(at.x - p.x, at.z - p.z);
+    };
+    let top = 0;
+    let feet = 0;
+    for (let i = 0; i < secs * 30; i++) {
+      watch();
+      h.frame('', 1, 33);
+      h.shots.lastElementChild?.remove();
+      const p = h.plane.object.position;
+      for (const e of h.world.entities) {
+        if (e instanceof Projectile && e.flat) far = Math.max(far, Math.hypot(e.object.position.x - p.x, e.object.position.z - p.z));
+      }
+      const kongs = h.kongs();
+      if (kongs.length) {
+        const y = Math.max(...kongs.map((k) => k.object.position.y));
+        top = edge(y + kongs[0].height);
+        feet = edge(y);
+      }
+      if (i % 30 === 29) h.frame(`bullets out to ${far.toFixed(0)}; screen edge ${top.toFixed(0)}-${feet.toFixed(0)} ahead`, 1, 1);
+    }
+    h.input.setButton(Button.FIRE1, false);
+    h.log(`bullets reach ${far.toFixed(0)} ahead; the screen's top edge is ${top.toFixed(0)} (kong heads) to ${feet.toFixed(0)} (feet) ahead`);
+    h.log(`${hits} kong hits, ${offscreen} of them off screen`);
+    h.check(far > feet, 'bullets get past the top of the screen');
+    h.check(far < feet * 2, 'but not much further');
+    h.check(offscreen === 0, 'no kong is hit off screen');
+  },
+
   /** The arrow to the nearest kong (use mission=killmonkeys.xml or
    *  clear.xml: a fixed number). Waits for a kong to climb (climbs made
    *  certain), then puts the plane `dist` (default 700) from it, facing
@@ -225,7 +286,7 @@ const SCENARIOS: Record<string, Scenario> = {
   /** Fly straight on for `secs`, a full frame (with the HUD) each second. */
   hud(h) {
     h.plane.charmed = true;
-    const secs = num('secs', 4);
+    const secs = num('secs', 10);
     for (let i = 0; i < secs; i++) {
       h.run(1000);
       h.frame(`frame ${i + 1}`);
