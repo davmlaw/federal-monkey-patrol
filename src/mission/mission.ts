@@ -11,7 +11,7 @@ import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, IconTally, KissPop, KongPointer, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
+import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, IconTally, KissPop, KongPointer, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 import { Finale } from './finale.ts';
@@ -97,7 +97,6 @@ export class Mission extends GameComponent {
   private outcomes: Outcomes | null = null;
   private countdowntimer: CountDownTimer | null = null;
   private clawalert: ClawAlert | null = null;
-  private fps = new FPSCounter();
   /** City generation progress, 0..1, shown by the load bar. */
   private progress = 0;
   private loadbar: LoadBar | null = null;
@@ -204,7 +203,7 @@ export class Mission extends GameComponent {
     this.livesDisplay = await LivesDisplay.create(this.lives);
     this.hud.add(this.livesDisplay, TOP | LEFT);
     this.livesDisplay.position.x += 0.01;
-    this.livesDisplay.position.y -= 0.06; // below the FPS readout
+    this.livesDisplay.position.y -= 0.01;
     this.cameraman = makeCameraMan();
 
     // The city, generated patch by patch behind the load bar
@@ -217,19 +216,21 @@ export class Mission extends GameComponent {
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
     if (this.bananaOptions) this.bananas = new Bananas({ ...this.bananaOptions, flat: this.flyMode === FlyMode.TOPDOWN }, this.world);
     this.tally = new IconTally(this.kongs.portrait(theDisplay.renderer), 0.22, this.kongs.respawns ? '' : 'LEFT');
-    this.hud.add(this.tally, TOP);
-    this.tally.position.y -= 0.06; // below the pause button
+    // the tallies (and the pointer) go down the left, under the lives
+    this.hud.add(this.tally, TOP | LEFT);
+    this.tally.position.y = this.livesDisplay.position.y - this.livesDisplay.getHeight() / 2 - 0.01 - this.tally.getHeight() / 2;
     if (this.kongs.blondes) {
       this.kongs.blondes.plane = this.player.entity;
       this.blondeTally = new IconTally(blondeIconTexture(), 0.22);
-      this.hud.add(this.blondeTally, TOP);
+      this.hud.add(this.blondeTally, TOP | LEFT);
       this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.005;
       this.blondeTally.setColor(1, 0.95, 0.7);
     }
     if (!this.kongs.respawns) {
       this.pointerRange = settings.getf('game', 'pointer_range') || 1200;
       this.pointer = new KongPointer(POINTER_SIZE);
-      this.hud.add(this.pointer, TOP);
+      this.hud.add(this.pointer, TOP | LEFT);
+      this.pointer.position.x = this.hudLeft() + POINTER_SIZE * 0.6;
       const above = this.blondeTally ?? this.tally;
       this.pointer.position.y = above.position.y - above.getHeight() / 2 - POINTER_SIZE * 0.9;
     }
@@ -390,6 +391,7 @@ export class Mission extends GameComponent {
       gamestats.set(Stat.MONKEY_POPULATION, this.kongs.remaining());
       this.tally.count = this.kongs.respawns ? gamestats.get(Stat.MONKEY_DEATHS) : this.kongs.remaining();
       if (this.blondeTally) this.blondeTally.count = gamestats.get(Stat.BLONDE_RESCUES);
+      this.alignTallies();
       this.blondeEvents(msecs);
     }
     if (!plane.crashed && !this.ending && !this.roaming) this.checkBounds(msecs);
@@ -503,10 +505,16 @@ export class Mission extends GameComponent {
     if (this.blondeMessageMsecs > 0 && !this.ending) display.draw2d(this.blondeMessage);
     if (this.kiss.showing) display.draw2d(this.kiss);
     if (this.ending) display.draw2d(this.banner);
-    if (msecs) {
-      this.fps.update(msecs);
-      display.draw2d(fpsOverlay(this.fps));
-    }
+  }
+
+  /** The left edge of the lives (the tallies line up with it). */
+  private hudLeft(): number {
+    return this.livesDisplay.position.x - this.livesDisplay.getWidth() / 2;
+  }
+
+  /** Keeps the tallies' left edges in line as their counts change width. */
+  private alignTallies(): void {
+    for (const t of [this.tally, this.blondeTally]) if (t) t.position.x = this.hudLeft() + t.getWidth() / 2;
   }
 
   private updateRadar(msecs: number): void {

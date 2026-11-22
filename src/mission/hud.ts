@@ -1,5 +1,5 @@
 // HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
-// TurnBack, KongPointer, IconTally, KissPop, Banner, the FPS readout, and the "generating
+// TurnBack, KongPointer, IconTally, KissPop, Banner, and the "generating
 // skyscrapers" LoadBar.
 
 import * as THREE from 'three';
@@ -495,49 +495,6 @@ export class Banner extends Drawable2D {
     this.title.draw(g, alpha);
     this.line.draw(g, alpha);
   }
-}
-
-const AVERAGE_OVER_FRAMES = 200;
-
-export class FPSCounter {
-  private frames = 0;
-  private framesSum = 0;
-  private fps = 0;
-  private maxFrameLength = 0;
-
-  update(msecs: number): void {
-    this.framesSum += msecs;
-    if (++this.frames % AVERAGE_OVER_FRAMES === 0) {
-      this.fps = this.frames / (this.framesSum / 1000);
-      this.frames = 0;
-      this.framesSum = 0;
-      this.maxFrameLength = 0;
-    }
-    this.maxFrameLength = Math.max(msecs, this.maxFrameLength);
-  }
-
-  getFPS(): number { return this.fps; }
-
-  getWorstFPS(): number { return this.maxFrameLength ? 1000 / this.maxFrameLength : 999.99; }
-}
-
-/** 6 significant digits, no trailing zeros. */
-function fmt(x: number): string { return String(Number(x.toPrecision(6))); }
-
-/** The two FPS lines at the top left. */
-export function fpsOverlay(counter: FPSCounter): Container2D {
-  const stats = new Container2D(ORTHO_W, ORTHO_H);
-  let y = ORTHO_H * 0.5;
-  const avg = `avrge fps: ${fmt(counter.getFPS())}`;
-  y -= textHeight(avg) * 0.2 / 2;
-  const average = new Text2D(avg, 0.2);
-  average.position.y = y;
-  stats.add(average, LEFT);
-  y -= textHeight(avg) * 0.2;
-  const worst = new Text2D(`worst fps: ${fmt(counter.getWorstFPS())}`, 0.2);
-  worst.position.y = y;
-  stats.add(worst, LEFT);
-  return stats;
 }
 
 // ===================================================================== LoadBar
