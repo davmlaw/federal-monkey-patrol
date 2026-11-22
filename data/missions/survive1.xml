@@ -12,10 +12,11 @@
   </model>
   <view>topdown</view>
   <controls>1942</controls>
-  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="1500" health_min="2" health_max="4">20</kongs>
+  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="4000" health_min="1" health_max="3">12</kongs>
   <!-- every kong in range and on screen throws one this often, at where
-       the plane will be when it reaches the top of its arc -->
-  <bananas every_msecs="2600" rise_secs="1.8">on</bananas>
+       the plane will be when it reaches the top of its arc (an easy
+       start: few kongs, slow bananas, a small hit area) -->
+  <bananas every_msecs="3800" rise_secs="2.2" hit_radius="11">on</bananas>
   <patrolradius>none</patrolradius>
   <!-- the kongs close round the plane's path, so they come on screen -->
   <roamradius>1200</roamradius>
