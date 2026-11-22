@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
-<!-- The story's last mission: the chase camera, and kongs carrying off
-     blondes all over, wherever the plane flies (no patrol area or radar).
-     Catch three and down five kongs; let one land and it's game over. -->
+<!-- The story's last mission, the climax: Monkey Mayhem with blondes and
+     against the clock. Forty kongs all round the plane wherever it flies
+     (no patrol area or radar), quick to be replaced, carrying blondes off
+     up the towers. Catch three and down fifteen kongs in three minutes;
+     let one land, or run out of time, and it's game over. -->
 <mission>
 
 <startconditions>
@@ -10,10 +12,14 @@
     <name>biplane.obj</name>
     <skin>biplane_skin.jpg</skin>
   </model>
-  <kongs respawn_msecs="4000" climb_chance="0.6">6</kongs>
-  <blondes grab_chance="1" max="6">on</blondes>
+  <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.8">40</kongs>
+  <blondes grab_chance="1" max="4">on</blondes>
   <patrolradius>none</patrolradius>
   <radar>off</radar>
+  <countdown>
+    <label>Time remaining</label>
+    <seconds>180</seconds>
+  </countdown>
 </startconditions>
 
 <outcomes>
@@ -21,12 +27,12 @@
     <condition>
       <and>
         <stat name="blonde_rescues" op="gte" value="3" />
-        <stat name="monkey_deaths" op="gte" value="5" />
+        <stat name="monkey_deaths" op="gte" value="15" />
       </and>
     </condition>
     <result>
       <value>next</value>
-      <message>Three blondes saved, five kongs down! The city is yours, Harlow.</message>
+      <message>Three blondes saved, fifteen kongs down! The city is yours, Harlow.</message>
     </result>
   </scenario>
   <scenario>
@@ -36,6 +42,15 @@
     <result>
       <value>lost</value>
       <message>She didn't make it. Game over</message>
+    </result>
+  </scenario>
+  <scenario>
+    <condition>
+      <stat name="game_seconds" op="gte" value="180" />
+    </condition>
+    <result>
+      <value>lost</value>
+      <message>Out of time. Game over</message>
     </result>
   </scenario>
 </outcomes>

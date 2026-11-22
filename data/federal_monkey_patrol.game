@@ -96,11 +96,11 @@ storyteller intermissions/4_underpants.shot
 transition fade 500
 
 ################################
-###   MISSION 5: RESCUE      ###
+###   MISSION 5: MAYHEM      ###
 ################################
-# the chase camera, blondes everywhere, five kongs to down: lose one and it's over
+# the climax: Monkey Mayhem with blondes, against the clock: lose one and it's over
 
-card 2200 Rescue 3 Blondes|Kill 5 Kongs|Lose None
+card 2400 Mayhem!|Rescue 3, Kill 15|Lose None
 transition fade 600
 mission rescue.xml
 transition fade 1000
