@@ -41,7 +41,7 @@ const GAMES: { file: string; title: string; note: string; group: Group; flow?: b
 // The story's missions, in order, for the menu's "Jump to mission" links
 // (?mission=N starts the story at the Nth's title card).
 const STORY_FILE = 'data/federal_monkey_patrol.game';
-const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Mayhem: Rescue 3 Blondes, Kill 15 Kongs'];
+const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Mayhem: Save 3 Blondes, Lose None, Kill 15 Kongs'];
 // "Skip to game" from a story with no missions in it
 const FREE_FLIGHT = 'fly.game';
 
