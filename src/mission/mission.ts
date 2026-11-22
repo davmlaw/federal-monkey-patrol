@@ -39,6 +39,9 @@ const OUT_MESSAGE_MSECS = 3000;
 // With no patrol area, the kongs' area is centred this far (in radii) ahead
 // of the plane.
 const ROAM_AHEAD = 0.4;
+// With a patrol area, the plane starts near its edge, heading for the
+// middle: the middle is this far (in radii) ahead of the start.
+const START_AHEAD = 0.85;
 // When an outcome ends the mission, its message shows this long first.
 const ENDING_MSECS = 4500;
 // A blonde caught or landed: this long the message shows.
@@ -107,7 +110,7 @@ export class Mission extends GameComponent {
   private crashTimer = 0;
   /** The game-over shot, once the last plane has crashed. */
   private finale: Finale | null = null;
-  /** The patrol area (game.properties patrol_radius, round the start). */
+  /** The patrol area (game.properties patrol_radius, ahead of the start). */
   private patrol: Area = { x: 0, z: 0, r: 3200 };
   private turnBackMsecs = 6000;
   /** Milliseconds spent outside the patrol area this time (0: inside). */
@@ -189,6 +192,11 @@ export class Mission extends GameComponent {
     const pos = this.player.entity.object.position;
     const radius = this.roaming ? this.roamRadius ?? (settings.getf('game', 'roam_radius') || 2500) : this.patrolRadius;
     this.patrol = { x: pos.x, z: pos.z, r: radius ?? (settings.getf('game', 'patrol_radius') || 3200) };
+    if (!this.roaming) {
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.player.entity.object.quaternion);
+      this.patrol.x += fwd.x * this.patrol.r * START_AHEAD;
+      this.patrol.z += fwd.z * this.patrol.r * START_AHEAD;
+    }
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
     this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
     this.hud.add(this.radar, TOP | RIGHT);
@@ -211,6 +219,7 @@ export class Mission extends GameComponent {
     patchSeeThrough(grid.group); // (for the game-over shot, compiled in now)
     this.world.addEntity(this.player.entity);
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
+    this.kongs.unseen = RADAR_RANGE * 1.1; // (a margin: the plane may be heading their way)
     if (this.bananaOptions) this.bananas = new Bananas({ ...this.bananaOptions, flat: this.flyMode === FlyMode.TOPDOWN }, this.world);
     const kongHead = this.kongs.portrait(theDisplay.renderer);
     this.tally = new IconTally(kongHead, 0.22, this.kongs.respawns ? '' : 'LEFT');

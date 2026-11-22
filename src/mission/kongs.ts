@@ -843,12 +843,15 @@ const SPAWN_APART = 600;
 // easy to see: on flat spots within the top TOWER_TOP of the tower's
 // highest place to stand, on towers whose top is at least TOWER_MIN (the
 // tallest reach about 2000; a quarter of blocks have one over about 1400).
-// A mission's tower_min instead allows any flat roof at least that tall.
+// A mission's tower_min instead allows any roof at least that tall (crowns
+// and spires too) within ROOF_TOP of the top of the tallest in its block.
 // With no such spot free, a kong waits to come.
 const TOWER_MIN = 1200;
 /** Where to look for a place to stand on a roof, for tower_min. */
 const ROOF_GRID: [number, number][] = [0.1, 0.3, 0.5, 0.7, 0.9].flatMap((fx) => [0.1, 0.3, 0.5, 0.7, 0.9].map((fz): [number, number] => [fx, fz]));
 const TOWER_TOP = 0.1;
+// With tower_min: within this of the top of the tallest thing in the block.
+const ROOF_TOP = 0.2;
 const PERCH_APART = 0.65; // kongs sharing a tower top stand this many heights apart
 // The game-over shot finds a kong (or puts one) within this of the camera.
 const FINALE_REACH = 2400;
@@ -887,6 +890,11 @@ export class KongTroop {
   private kongs: Kong[] = [];
   private respawn = 0;
   private started = false;
+  /** Kongs that come later (respawns, replacements) come at least this far
+   *  from the plane where they can (the radar's range: so they don't pop
+   *  up on it). The first lot are there from the start. */
+  unseen = 0;
+  private later = false;
   /** No more come once these are down. */
   readonly respawns: boolean;
   readonly rooftops: boolean;
@@ -974,25 +982,43 @@ export class KongTroop {
     return t;
   }
 
-  /** A crossing in the patrol area, not too near the plane and away from
-   *  other kongs. */
+  /** A crossing in the patrol area, not too near the plane (after the
+   *  first lot, off the radar where it can) and away from other kongs. */
   private spawnPoint(player: THREE.Object3D): [number, number] {
     const { x: ax, z: az, r } = this.area;
+    const away = this.later ? Math.max(SPAWN_NEAR, this.unseen) : SPAWN_NEAR;
     let best: [number, number] = [ax, az];
     let bestScore = -1;
-    for (let i = 0; i < 20; i++) {
+    const { x: px, z: pz } = player.position;
+    for (let i = 0; i < 80; i++) {
       const a = Math.random() * Math.PI * 2;
-      const d = Math.sqrt(Math.random()) * r * 0.8;
-      const x = Math.round((ax + Math.sin(a) * d) / BLOCKSIZE) * BLOCKSIZE;
-      const z = Math.round((az + Math.cos(a) * d) / BLOCKSIZE) * BLOCKSIZE;
+      let cx: number;
+      let cz: number;
+      if (away > SPAWN_NEAR && i % 2) {
+        // just past `away` from the plane, where that's in the area (in a
+        // roaming area, a thin crescent ahead; the crossing it's rounded to
+        // is scored as it is)
+        const d = away + BLOCKSIZE * Math.random();
+        cx = px + Math.sin(a) * d;
+        cz = pz + Math.cos(a) * d;
+        if (Math.hypot(cx - ax, cz - az) > r) continue;
+      } else {
+        const d = Math.sqrt(Math.random()) * r * 0.8;
+        cx = ax + Math.sin(a) * d;
+        cz = az + Math.cos(a) * d;
+      }
+      const x = Math.round(cx / BLOCKSIZE) * BLOCKSIZE;
+      const z = Math.round(cz / BLOCKSIZE) * BLOCKSIZE;
       let apart = Infinity;
       for (const k of this.kongs) apart = Math.min(apart, Math.hypot(k.object.position.x - x, k.object.position.z - z));
-      const score = Math.min(apart / SPAWN_APART, Math.hypot(player.position.x - x, player.position.z - z) / SPAWN_NEAR);
+      // far enough first, then apart from the others
+      const far = Math.min(1, Math.hypot(px - x, pz - z) / away);
+      const score = far < 1 ? far : 1 + Math.min(1, apart / SPAWN_APART);
       if (score > bestScore) {
         best = [x, z];
         bestScore = score;
       }
-      if (score >= 1) break;
+      if (score >= 2) break;
     }
     return best;
   }
@@ -1027,10 +1053,17 @@ export class KongTroop {
         spots.push([x, y, z]);
       }
     }
-    // only near the top: the highest spot's level and a little below it
-    const top = Math.max(0, ...spots.map((p) => p[1]));
-    const high = this.roofMin !== null ? spots
-      : top >= TOWER_MIN ? spots.filter((p) => p[1] >= top * (1 - TOWER_TOP)) : [];
+    // only near the top: the highest spot's level and a little below it;
+    // with tower_min, near the top of the block's tallest building (a kong
+    // on a low roof among towers is hidden from above and hard to shoot)
+    let high: [number, number, number][];
+    if (this.roofMin !== null) {
+      const top = Math.max(0, ...boxes.map((b) => b.y1));
+      high = spots.filter((p) => p[1] >= top * (1 - ROOF_TOP));
+    } else {
+      const top = Math.max(0, ...spots.map((p) => p[1]));
+      high = top >= TOWER_MIN ? spots.filter((p) => p[1] >= top * (1 - TOWER_TOP)) : [];
+    }
     this.spots.set(key, high);
     return high;
   }
@@ -1054,7 +1087,10 @@ export class KongTroop {
         }
       }
     }
-    return free.length ? free[Math.floor(Math.random() * free.length)] : null;
+    // after the first lot, off the radar if there's a spot that far
+    const unseen = this.later ? free.filter((p) => Math.hypot(player.position.x - p[0], player.position.z - p[2]) >= this.unseen) : [];
+    const pick = unseen.length ? unseen : free;
+    return pick.length ? pick[Math.floor(Math.random() * pick.length)] : null;
   }
 
   /** A kong for the game-over shot: one standing on a roof near `eye`
@@ -1149,6 +1185,7 @@ export class KongTroop {
     if (!this.started) {
       this.started = true;
       for (let i = 0; i < this.count; i++) this.spawn(world, player);
+      this.later = true;
     }
     // left far behind: gone, and replaced straight away
     const { x: ax, z: az, r } = this.area;

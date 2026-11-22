@@ -8,7 +8,7 @@
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
 //                     blonde, icons, kongfall, gameover, bananas, pointer (the kong finder), win, reach,
-//                     midway
+//                     midway, start, perches, popin
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -285,6 +285,74 @@ const SCENARIOS: Record<string, Scenario> = {
     h.frame('just won', 10, 30);
     h.run(2000);
     h.frame('a little later', 3, 30);
+  },
+
+  /** The start (use a mission with a patrol area, e.g. killmonkeys.xml):
+   *  the plane starts near the area's edge heading for its middle, then
+   *  flies straight on for 6 seconds without being warned to turn back. */
+  start(h) {
+    h.plane.charmed = true;
+    const m = h.internals;
+    const p = h.plane.object.position;
+    const d = Math.hypot(p.x - m.patrol.x, p.z - m.patrol.z);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(h.plane.object.quaternion);
+    const toward = (fwd.x * (m.patrol.x - p.x) + fwd.z * (m.patrol.z - p.z)) / d;
+    h.log(`start ${d.toFixed(0)} from the middle of a ${m.patrol.r} radius area, heading ${toward.toFixed(2)} towards it`);
+    h.check(d > 0.6 * m.patrol.r && d < m.patrol.r, 'starts near the edge, inside');
+    h.check(toward > 0.95, 'heads for the middle');
+    h.frame('start');
+    let out = false;
+    h.run(6000, { each: () => { out ||= Math.hypot(p.x - m.patrol.x, p.z - m.patrol.z) > m.patrol.r; } });
+    h.check(!out, 'still inside after 6 seconds');
+    h.frame('6 seconds on');
+  },
+
+  /** Kongs coming later (use a roaming mission, e.g. saveblondes.xml, where
+   *  those left behind are replaced): flies straight on for `secs` (default
+   *  30) and notes how far from the plane each new kong comes. Checks they
+   *  come off the radar (`range`, default 2400). */
+  popin(h) {
+    h.plane.charmed = true;
+    const range = num('range', 2400);
+    const seen = new Set(h.kongs());
+    const p = h.plane.object.position;
+    let fresh = 0;
+    let near = 0;
+    h.run(num('secs', 30) * 1000, {
+      each: () => {
+        for (const k of h.kongs()) {
+          if (seen.has(k)) continue;
+          seen.add(k);
+          fresh++;
+          const d = Math.hypot(k.object.position.x - p.x, k.object.position.z - p.z);
+          if (d < range) near++;
+          h.log(`new kong ${d.toFixed(0)} from the plane`);
+        }
+      },
+    });
+    h.check(fresh > 0, `kongs come later (${fresh})`);
+    h.check(near === 0, `all off the radar (${near} on it)`);
+  },
+
+  /** Rooftop kongs (use a top-down mission, e.g. survive1.xml): after `secs`
+   *  (default 4), each kong's height against the tallest thing in its
+   *  block, close up and in the player's view. Checks they're all up near
+   *  the top. */
+  perches(h) {
+    h.plane.charmed = true;
+    h.run(num('secs', 4) * 1000);
+    const grid = h.world.grid;
+    let low = 0;
+    for (const [i, k] of h.kongs().entries()) {
+      const p = k.object.position;
+      const top = Math.max(0, ...grid.blockBoxes(Math.floor(p.x / BLOCKSIZE), Math.floor(p.z / BLOCKSIZE)).map((b) => b.y1));
+      h.log(`kong ${i} at ${p.x.toFixed(0)},${p.z.toFixed(0)}: on ${p.y.toFixed(0)}, block top ${top.toFixed(0)}`);
+      if (p.y < 0.79 * top) low++;
+      if (i < 6) h.look(`kong ${i} on ${p.y.toFixed(0)} of ${top.toFixed(0)}`, Harness.middle(k), 4 * k.height, 0.6, 0.9);
+    }
+    h.check(h.kongs().length > 0, 'kongs are up');
+    h.check(low === 0, `every kong near the top of its block (${low} low)`);
+    h.frame('the player\'s view');
   },
 
   /** Fly straight on for `secs`, a full frame (with the HUD) each second. */
