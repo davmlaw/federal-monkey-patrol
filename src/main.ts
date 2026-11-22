@@ -38,6 +38,10 @@ const GAMES: { file: string; title: string; note: string; group: Group; flow?: b
   { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
   { group: 'extra', file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
 ];
+// The story's missions, in order, for the menu's "Jump to mission" links
+// (?mission=N starts the story at the Nth's title card).
+const STORY_FILE = 'data/federal_monkey_patrol.game';
+const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Rescue 3 Blondes'];
 // "Skip to game" from a story with no missions in it
 const FREE_FLIGHT = 'fly.game';
 
@@ -70,11 +74,13 @@ skipLink.addEventListener('click', (e) => {
   skipToGame();
 });
 
-function gameUrl(file: string, flow = false): string {
+function gameUrl(file: string, flow = false, mission = 0): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
   if (flow) u.searchParams.set('flow', '1');
   else u.searchParams.delete('flow');
+  if (mission) u.searchParams.set('mission', String(mission));
+  else u.searchParams.delete('mission');
   return u.pathname + u.search;
 }
 
@@ -129,12 +135,13 @@ function showMenu({ ended = false } = {}): void {
   const params = new URLSearchParams(window.location.search);
   const chosen = params.get('game');
   const chosenFlow = params.get('flow') === '1';
+  const chosenMission = parseInt(params.get('mission') ?? '', 10) || 0;
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
     : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
     : 'The End.';
   const link = (g: (typeof GAMES)[number], note = true): string => `
-    <a href="${gameUrl(g.file, g.flow)}" data-game="${g.file}"${g.flow ? ' data-flow="1"' : ''} class="${g.file === chosen && !!g.flow === chosenFlow ? 'chosen' : ''}">
+    <a href="${gameUrl(g.file, g.flow)}" data-game="${g.file}"${g.flow ? ' data-flow="1"' : ''} class="${g.file === chosen && !!g.flow === chosenFlow && !chosenMission ? 'chosen' : ''}">
       <span class="t">${g.title}</span>${note ? `<span class="n">${g.note}</span>` : ''}</a>`;
   const group = (k: Group): (typeof GAMES)[number][] => GAMES.filter((g) => g.group === k);
   overlay.innerHTML = `
@@ -145,6 +152,8 @@ function showMenu({ ended = false } = {}): void {
       <ul class="games">${group('mode').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
       <h2>Story</h2>
       <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
+      <p class="extras">Jump to mission: ${STORY_MISSIONS.map((t, i) => `<a href="${gameUrl(STORY_FILE, false, i + 1)}" data-game="${STORY_FILE}" data-mission="${i + 1}"
+        class="${chosen === STORY_FILE && chosenMission === i + 1 ? 'chosen' : ''}">${i + 1}. ${t}</a>`).join(' &middot; ')}</p>
       <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}
         &middot; <a href="kongtest.html">Kong &amp; blonde animations</a></p>
       <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
@@ -162,13 +171,14 @@ function showMenu({ ended = false } = {}): void {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       window.history.replaceState(null, '', a.getAttribute('href'));
-      start(a.dataset.game ?? null, a.dataset.flow === '1');
+      start(a.dataset.game ?? null, a.dataset.flow === '1', parseInt(a.dataset.mission ?? '', 10) || 0);
     });
   });
   (overlay.querySelector<HTMLAnchorElement>('a.chosen') ?? overlay.querySelector<HTMLAnchorElement>('a[data-game]'))?.focus();
 }
 
-async function start(file: string | null, flow = false): Promise<void> {
+/** `mission`: start the story at its Nth mission (0: the beginning). */
+async function start(file: string | null, flow = false, mission = 0): Promise<void> {
   unlockAudio();
   overlay.hidden = true;
   canvas.focus();
@@ -178,6 +188,7 @@ async function start(file: string | null, flow = false): Promise<void> {
     await loadFont();
     tuner = await Tuner.create();
     game = await GameManager.fromFile(file || settings.gets('main', 'default_game'), tuner, { flow });
+    if (mission && !game.startAtMission(mission)) console.warn(`no mission ${mission} in ${file}`);
   } catch (e) {
     console.error(e);
     overlay.innerHTML = `<div class="panel"><h1>Uncaught Exception</h1><pre>${String(e instanceof Error ? e.message : e)}</pre></div>`;
