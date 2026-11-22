@@ -107,55 +107,33 @@ export class LivesDisplay extends Drawable2D {
   }
 }
 
-/** A blonde's head, for her icons: a yellow circle with a 1930s wave of
- *  golden hair, outlined dark so it shows on anything. Drawn into `g` round
- *  (cx, cy), `r` the face's radius (the hair reaches about 1.5 r out). */
+/** A blonde, for her icons: an abstract symbol, not a face: a plain round
+ *  head with two locks of golden hair hanging below it either side, flat
+ *  colours outlined dark so it shows on anything. Drawn into `g` round
+ *  (cx, cy), `r` the head's radius (the locks reach about 1.5 r down). */
 export function drawBlondeHead(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
   const ink = '#2a1d08';
-  const hair = '#e8a818';
   g.lineJoin = 'round';
-  g.lineWidth = Math.max(1.5, r * 0.16);
+  g.lineWidth = Math.max(1.5, r * 0.14);
   g.strokeStyle = ink;
-  // the hair behind: a rounded mass over the top, falling in curls to the jaw
-  const back = new Path2D();
-  back.moveTo(cx - 1.3 * r, cy + 0.9 * r);
-  back.bezierCurveTo(cx - 1.75 * r, cy - 0.2 * r, cx - 1.45 * r, cy - 1.45 * r, cx, cy - 1.45 * r);
-  back.bezierCurveTo(cx + 1.45 * r, cy - 1.45 * r, cx + 1.75 * r, cy - 0.2 * r, cx + 1.3 * r, cy + 0.9 * r);
-  back.bezierCurveTo(cx + 1.0 * r, cy + 1.25 * r, cx + 0.6 * r, cy + 0.9 * r, cx + 0.7 * r, cy + 0.5 * r);
-  back.lineTo(cx - 0.7 * r, cy + 0.5 * r);
-  back.bezierCurveTo(cx - 0.6 * r, cy + 0.9 * r, cx - 1.0 * r, cy + 1.25 * r, cx - 1.3 * r, cy + 0.9 * r);
-  back.closePath();
-  g.fillStyle = hair;
-  g.fill(back);
-  g.stroke(back);
-  // the face
+  // the head
   g.beginPath();
-  g.arc(cx, cy + 0.1 * r, r, 0, Math.PI * 2);
-  g.fillStyle = '#ffe23a';
+  g.arc(cx, cy, r, 0, Math.PI * 2);
+  g.fillStyle = '#f4e8c8';
   g.fill();
   g.stroke();
-  // the fringe: waves swept across the forehead from a side parting
-  const fringe = new Path2D();
-  fringe.moveTo(cx - 1.1 * r, cy + 0.2 * r);
-  fringe.bezierCurveTo(cx - 1.2 * r, cy - 1.2 * r, cx + 0.3 * r, cy - 1.4 * r, cx + 1.1 * r, cy - 0.05 * r);
-  fringe.bezierCurveTo(cx + 0.75 * r, cy - 0.3 * r, cx + 0.45 * r, cy - 0.1 * r, cx + 0.15 * r, cy - 0.3 * r);
-  fringe.bezierCurveTo(cx - 0.15 * r, cy - 0.05 * r, cx - 0.5 * r, cy - 0.25 * r, cx - 0.7 * r, cy - 0.05 * r);
-  fringe.bezierCurveTo(cx - 0.85 * r, cy + 0.05 * r, cx - 0.95 * r, cy + 0.1 * r, cx - 1.1 * r, cy + 0.2 * r);
-  fringe.closePath();
-  g.fillStyle = hair;
-  g.fill(fringe);
-  g.stroke(fringe);
-  // eyes and a smile
-  g.fillStyle = ink;
+  // the hair: two locks falling from the sides of the head to below it,
+  // flicking out a little at the ends
+  g.fillStyle = '#e8b020';
   for (const s of [-1, 1]) {
-    g.beginPath();
-    g.arc(cx + s * 0.36 * r, cy + 0.22 * r, 0.11 * r, 0, Math.PI * 2);
-    g.fill();
+    const lock = new Path2D();
+    lock.moveTo(cx + s * 0.62 * r, cy + 0.05 * r);
+    lock.quadraticCurveTo(cx + s * 0.62 * r, cy + 1.0 * r, cx + s * 1.25 * r, cy + 1.5 * r);
+    lock.quadraticCurveTo(cx + s * 1.25 * r, cy + 0.5 * r, cx + s * 0.95 * r, cy - 0.4 * r);
+    lock.closePath();
+    g.fill(lock);
+    g.stroke(lock);
   }
-  g.beginPath();
-  g.arc(cx, cy + 0.4 * r, 0.36 * r, 0.2 * Math.PI, 0.8 * Math.PI);
-  g.lineWidth = Math.max(1, r * 0.1);
-  g.stroke();
 }
 
 let blondeIcon: THREE.Texture | null = null;

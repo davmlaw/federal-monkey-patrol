@@ -17,6 +17,10 @@
 //   --timeout <ms>   give up waiting after this long (default 600000)
 //   --wait <ms>      for pages that never say they're done: just wait
 //   --size <WxH>     viewport (default 1300x900)
+//   --click <text>   click the link with this text first (e.g. a menu
+//                    entry: 'The Story'), as a player would
+//   --every <ms>     with --wait: also a screenshot every <ms> (name_<ms>.png),
+//                    e.g. to see the story's opening play out
 //
 // A page is done when window.harness.done (gametest.html) or
 // window.sheetDone (kongtest.html's sheets) is true. Exits non-zero if a
@@ -66,7 +70,13 @@ for (const path of pages) {
   page.on('pageerror', (e) => { failed = true; console.log(`  PAGE ERROR ${e.stack ?? e.message}`); });
   const t0 = Date.now();
   await page.goto(base + path);
-  if (opt.wait) await page.waitForTimeout(Number(opt.wait));
+  if (opt.click) await page.getByText(opt.click, { exact: true }).first().click();
+  if (opt.wait && opt.every) {
+    for (let at = Number(opt.every); at <= Number(opt.wait); at += Number(opt.every)) {
+      await page.waitForTimeout(Number(opt.every));
+      await page.screenshot({ path: `${opt.out}/${name}_${at}.png` });
+    }
+  } else if (opt.wait) await page.waitForTimeout(Number(opt.wait));
   else {
     await page.waitForFunction(() => window.harness?.done || window.sheetDone, null, { timeout: Number(opt.timeout), polling: 250 })
       .catch(() => { failed = true; console.log('  TIMED OUT'); });

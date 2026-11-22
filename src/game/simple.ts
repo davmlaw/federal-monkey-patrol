@@ -78,8 +78,8 @@ export class Picture extends GameComponent {
 }
 
 /**
- * `card <msecs> <text>`: a silent-film title card, white lettering in a
- * border on black, with film grain over it. `|` breaks a line. It shows
+ * `card <msecs> <text>`: a silent-film title card, sepia lettering in a
+ * border on dark brown, with slow film grain over it. `|` breaks a line. It shows
  * for `msecs`, and if the mission after it (`ahead`, set by the
  * GameManager, which loads it early) is still generating its city, until
  * that's ready, so the card covers the load bar.
@@ -93,7 +93,7 @@ export class TitleCard extends GameComponent {
 
   constructor(text: string, private msecs: number) {
     super();
-    this.card = cardLayer(text);
+    this.card = cardLayer(text, { sepia: true });
   }
 
   protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
@@ -107,12 +107,16 @@ export class TitleCard extends GameComponent {
 /** A title card's layer; update() it each frame it's shown (the film). */
 export interface Card { layer: HTMLDivElement; update(): void }
 
-/** A title card (see TitleCard) saying `text` (`|` breaks a line). */
-export function cardLayer(text: string): Card {
+/** A title card (see TitleCard) saying `text` (`|` breaks a line):
+ *  white on black, or `sepia` toned with the grain changing more slowly. */
+export function cardLayer(text: string, { sepia = false } = {}): Card {
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const lines = text.split('|').map((l) => `<span>${esc(l.trim())}</span>`).join('');
   const layer = makeLayer('card', `<div class="frame"><div class="words">${lines}</div></div>`);
-  const film = new FilmGrain({ weave: layer.firstElementChild as HTMLElement });
+  if (sepia) layer.classList.add('sepia');
+  const film = new FilmGrain(sepia
+    ? { weave: layer.firstElementChild as HTMLElement, fps: 10, flicker: 0.07, strength: 0.8 }
+    : { weave: layer.firstElementChild as HTMLElement });
   layer.append(film.el);
   return { layer, update: () => film.update() };
 }

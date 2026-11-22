@@ -2,10 +2,9 @@
 // and a dark vignette, as if the scene were cut in from a worn print.
 //
 // A FilmGrain is a layer of its own (a canvas, scaled up over the stage)
-// redrawn at 24 frames a second of real time, so it keeps moving while the
+// redrawn at 24 frames a second of real time (or `fps`), so it keeps moving while the
 // component under it is frozen by a transition.
 
-const FPS = 24;
 const W = 200; // the canvas: coarse, so the grain shows as clumps
 const H = 150;
 
@@ -16,6 +15,8 @@ export interface FilmOptions {
   flicker?: number;
   /** Jiggled about a little each frame (gate weave). */
   weave?: HTMLElement;
+  /** How many times a second the grain changes (24, the film's rate). */
+  fps?: number;
 }
 
 export class FilmGrain {
@@ -27,10 +28,12 @@ export class FilmGrain {
   private strength: number;
   private flicker: number;
   private weave: HTMLElement | null;
+  private fps: number;
   /** A scratch that stays a few frames: x (0..1), frames left. */
   private scratch: { x: number; left: number; dark: boolean } | null = null;
 
-  constructor({ strength = 1, flicker = 0.12, weave }: FilmOptions = {}) {
+  constructor({ strength = 1, flicker = 0.12, weave, fps = 24 }: FilmOptions = {}) {
+    this.fps = fps;
     this.strength = strength;
     this.flicker = flicker;
     this.weave = weave ?? null;
@@ -48,7 +51,7 @@ export class FilmGrain {
 
   /** Redraw if a film frame has gone by. `now` in milliseconds. */
   update(now = performance.now()): void {
-    const frame = Math.floor(now * FPS / 1000);
+    const frame = Math.floor(now * this.fps / 1000);
     if (frame === this.last) return;
     this.last = frame;
     const s = this.strength;

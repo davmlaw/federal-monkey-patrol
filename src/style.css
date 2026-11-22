@@ -428,3 +428,10 @@ pre { white-space: pre-wrap; color: #f88; }
   color: #ece6d6;
   text-shadow: 0 0 0.12em rgba(236, 230, 214, 0.35);
 }
+
+/* sepia toned (story cards) */
+#stage .card.sepia { background: radial-gradient(ellipse at center, #3a2613 0%, #1c1107 100%); }
+#stage .card.sepia .frame { border-color: #d8b77e; outline-color: rgba(216, 183, 126, 0.45); }
+#stage .card.sepia .frame::before,
+#stage .card.sepia .frame::after { color: #d8b77e; background: #2b1c0d; }
+#stage .card.sepia .words { color: #f0dcb0; text-shadow: 0 0 0.12em rgba(240, 220, 176, 0.35); }

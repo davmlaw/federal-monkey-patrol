@@ -7,14 +7,6 @@
 
 blank 000000
 transition fade 200
-picture data/images/leader/leader_4.jpg film
-transition spin 800
-picture data/images/leader/leader_4.jpg 0 aaaaaa film
-
-picture data/images/leader/leader_3.jpg film
-transition spin 800
-picture data/images/leader/leader_3.jpg 0 aaaaaa film
-
 picture data/images/leader/leader_2.jpg film
 transition spin 800
 picture data/images/leader/leader_2.jpg 0 aaaaaa film
@@ -31,8 +23,8 @@ transition fade 200
 ################################
 
 # (the card stays up while the mission's city is generated)
-card 3500 Kill|3 Kongs
-transition fade 1000
+card 2200 Kill|3 Kongs
+transition fade 600
 mission killmonkeys.xml
 
 transition fade 1000
