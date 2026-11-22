@@ -320,6 +320,21 @@ pre { white-space: pre-wrap; color: #f88; }
 
 #stage .story .pic img { width: 100%; display: block; }
 
+/* `caption` in a .shot: a sepia intertitle plate on the picture */
+#stage .story .caption {
+  position: absolute;
+  top: 4%;
+  left: 3%;
+  padding: 0.25em 0.8em;
+  background: rgba(43, 28, 13, 0.88);
+  border: 0.12em double #d8b77e;
+  color: #f0dcb0;
+  font-family: "Playfair Display", Didot, "Bodoni 72", "Bodoni MT", Georgia, "Times New Roman", serif;
+  font-size: 1.3em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 #stage .dialogue {
   position: absolute;
   inset: 66.6% 0 0 0;

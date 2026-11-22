@@ -3,7 +3,7 @@
 
 import { loadSound, playSound, type SoundHandle } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
-import type { Input } from '../core/input.ts';
+import { TapWatch, type Input } from '../core/input.ts';
 import { GameComponent, Status } from './component.ts';
 import { FilmGrain } from './film.ts';
 import { makeLayer, stage } from './stage.ts';
@@ -93,17 +93,22 @@ export class TitleCard extends GameComponent {
   private shown = 0;
   protected card: Card;
   ahead: GameComponent | null = null;
+  /** Checking the story's flow: stays up until tapped (or Space/Enter). */
+  holdForTap = false;
+  private taps = new TapWatch();
 
   constructor(text: string, private msecs: number) {
     super();
     this.card = cardLayer(text);
   }
 
-  protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
+  protected override _play(_display: Display, msecs: number, input: Input | null, alpha: number): void {
     this.shown += msecs;
     this.card.update();
     stage.show(this.card.layer, alpha);
-    if (this.shown >= this.msecs && (!this.ahead || this.ahead.loaded)) this.status = Status.NEXT;
+    const tapped = this.holdForTap && this.taps.tapped(input);
+    const up = this.holdForTap ? tapped : this.shown >= this.msecs;
+    if (up && (!this.ahead || this.ahead.loaded)) this.status = Status.NEXT;
   }
 }
 

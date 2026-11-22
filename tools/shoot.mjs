@@ -21,6 +21,8 @@
 //                    entry: 'The Story'), as a player would
 //   --every <ms>     with --wait: also a screenshot every <ms> (name_<ms>.png),
 //                    e.g. to see the story's opening play out
+//   --tap            with --every: tap the middle of the page before each
+//                    (to move through the story as a player would)
 //
 // A page is done when window.harness.done (gametest.html) or
 // window.sheetDone (kongtest.html's sheets) is true. Exits non-zero if a
@@ -40,7 +42,8 @@ const opt = { out: 'shots', timeout: 600000, wait: 0, size: '1300x900' };
 const pages = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (a.startsWith('--')) opt[a.slice(2)] = args[++i];
+  if (a === '--tap') opt.tap = true;
+  else if (a.startsWith('--')) opt[a.slice(2)] = args[++i];
   else pages.push(a);
 }
 if (!pages.length) {
@@ -74,6 +77,8 @@ for (const path of pages) {
   if (opt.wait && opt.every) {
     for (let at = Number(opt.every); at <= Number(opt.wait); at += Number(opt.every)) {
       await page.waitForTimeout(Number(opt.every));
+      if (opt.tap) await page.mouse.click(width / 2, height / 2);
+      await page.waitForTimeout(opt.tap ? 300 : 0);
       await page.screenshot({ path: `${opt.out}/${name}_${at}.png` });
     }
   } else if (opt.wait) await page.waitForTimeout(Number(opt.wait));

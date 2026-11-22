@@ -10,7 +10,7 @@
 
 import { loadSound, playSound, readLines, type SoundHandle } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
-import { Button, type Input } from '../core/input.ts';
+import { TapWatch, type Input } from '../core/input.ts';
 import { dircheck, settings } from '../core/settings.ts';
 import { GameComponent, Status } from './component.ts';
 import { makeLayer, stage } from './stage.ts';
@@ -63,13 +63,16 @@ export class StoryTeller extends GameComponent {
   private dialogues: Dialogue[] = [];
   private current = 0;
   private started = false;
-  private lastTaps: [boolean, boolean] | null = null;
+  private taps = new TapWatch();
   /** Speaker name -> portrait file (relative to dir). */
   private portrait: Record<string, string> = {};
   private msecInitial = 0;
   private msecPerWord = 0;
   private dir = '';
   private imagePath = '';
+  /** `caption <text>`: a label on the picture, e.g. "Earlier..." for a
+   *  flashback. */
+  private caption = '';
   private layer: HTMLDivElement = makeLayer('story');
   private box: HTMLElement = this.layer;
 
@@ -103,6 +106,8 @@ export class StoryTeller extends GameComponent {
       if (words.length < 2) continue;
       if (words[0] === 'picture') {
         this.imagePath = this.dir + words[1];
+      } else if (words[0] === 'caption') {
+        this.caption = words.slice(1).join(' ');
       } else if (words[0] === 'portrait') {
         if (words.length >= 3) this.portrait[words[1]] = words[2];
       } else {
@@ -117,6 +122,12 @@ export class StoryTeller extends GameComponent {
       img.alt = '';
       await img.decode().catch(() => console.warn(`Could not load picture "${this.imagePath}"`));
       this.layer.querySelector('.pic')!.append(img);
+    }
+    if (this.caption) {
+      const cap = document.createElement('div');
+      cap.className = 'caption';
+      cap.textContent = this.caption;
+      this.layer.append(cap);
     }
     this.dialogues = (await Promise.all(pending)).filter((d): d is Dialogue => !!d);
     this.current = 0;
@@ -150,13 +161,7 @@ export class StoryTeller extends GameComponent {
   }
 
   /** A new press of Space/Enter or a tap/click since the last frame. */
-  private tapped(input: Input | null): boolean {
-    if (!input) return false;
-    const taps: [boolean, boolean] = [input.buttonToggled(Button.FIRE1), input.buttonToggled(Button.NEXT)];
-    const last = this.lastTaps;
-    this.lastTaps = taps;
-    return !!last && (taps[0] !== last[0] || taps[1] !== last[1]);
-  }
+  private tapped(input: Input | null): boolean { return this.taps.tapped(input); }
 
   /** Show line i in the box, stacked under the earlier ones if it fits. */
   private show(i: number): void {

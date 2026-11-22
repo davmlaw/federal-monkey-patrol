@@ -144,6 +144,20 @@ class Joystick implements InputDevice {
   dispose(): void {}
 }
 
+/** Watches for a new press of Space/Enter (FIRE1) or a tap/click (NEXT)
+ *  since the last frame: call tapped() once a frame. */
+export class TapWatch {
+  private last: [boolean, boolean] | null = null;
+
+  tapped(input: Input | null): boolean {
+    if (!input) return false;
+    const taps: [boolean, boolean] = [input.buttonToggled(Button.FIRE1), input.buttonToggled(Button.NEXT)];
+    const last = this.last;
+    this.last = taps;
+    return !!last && (taps[0] !== last[0] || taps[1] !== last[1]);
+  }
+}
+
 /** Taps and clicks on the game canvas, as Button.NEXT. */
 export class PointerTap implements InputDevice {
   private pending = false;

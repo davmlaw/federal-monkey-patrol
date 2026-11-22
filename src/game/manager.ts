@@ -98,6 +98,7 @@ export class GameManager extends GameComponent {
     } else {
       throw new Error(`${err} invalid line`);
     }
+    if (this.flow && gc instanceof TitleCard) gc.holdForTap = true;
     this.addComponent(gc);
   }
 
