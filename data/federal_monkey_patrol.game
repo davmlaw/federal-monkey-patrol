@@ -55,7 +55,6 @@ transition fade 1000
 ###   STORY 2: POLICE HQ     ###
 ################################
 
-storyteller intermissions/2a_car.shot
 storyteller intermissions/2b_sign_here.shot
 storyteller intermissions/2c_windows.shot
 storyteller intermissions/2d_get_him_a_plane.shot
