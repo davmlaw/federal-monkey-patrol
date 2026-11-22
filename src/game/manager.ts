@@ -163,6 +163,24 @@ export class GameManager extends GameComponent {
     return this.components.some((c, i) => i > this.current && c instanceof Mission);
   }
 
+  /** Start at the `n`th mission (1-based), at the title card before it if
+   *  it has one: for jumping into the story partway. False if there's no
+   *  such mission. Call before playing. */
+  startAtMission(n: number): boolean {
+    let target = -1;
+    for (let i = 0, seen = 0; i < this.components.length; i++) {
+      if (this.components[i] instanceof Mission) {
+        if (++seen === n) { target = i; break; }
+      }
+    }
+    if (target < 0) return false;
+    let j = target - 1;
+    while (j >= 0 && this.components[j] instanceof Transition) j--;
+    if (j >= 0 && this.components[j] instanceof TitleCard) target = j;
+    this.current = target;
+    return true;
+  }
+
   /** Jump straight to the next mission, skipping the story before it. */
   skipToMission(): boolean {
     const target = this.components.findIndex((c, i) => i > this.current && c instanceof Mission);
