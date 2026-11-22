@@ -260,17 +260,12 @@ export class Kong extends Entity {
     return { point: a.lerp(b, 0.5), radius: r };
   }
 
-  override distanceTo(point: THREE.Vector3): number {
-    const { a, b, r } = this.capsule();
-    return new THREE.Line3(a, b).closestPointToPoint(point, true, new THREE.Vector3()).distanceTo(point) - r;
-  }
-
   override struck(world: World, hit: Hit, velocity: THREE.Vector3, damage: number): void {
     world.effects.furHit(hit.point, hit.normal, velocity);
     if (this.dying) return;
     this.flash = FLASH_MSECS;
     this.health -= damage;
-    if (this.health <= 0) this.die(world, velocity);
+    if (this.health <= 0) this.die(velocity);
   }
 
   private volume(): number {
@@ -289,7 +284,7 @@ export class Kong extends Entity {
    *  from the shot (going at `shot`); up on a building it tumbles off,
    *  bouncing down any ledges and setbacks in the way, out over the street
    *  and down to it (see updateTumble). */
-  private die(world: World, shot: THREE.Vector3): void {
+  private die(shot: THREE.Vector3): void {
     this.dying = true;
     this.tasks = [];
     gamestats.inc(Stat.MONKEY_DEATHS);

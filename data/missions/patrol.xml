@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- A plain patrol, for the test harness (gametest.html's default mission;
+     not in the game): the kongs of kong.properties in the patrol area,
+     with blondes, no goal and no clock. -->
+<mission>
+
+<startconditions>
+  <height>5000</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+</startconditions>
+
+</mission>

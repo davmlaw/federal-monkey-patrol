@@ -8,8 +8,8 @@
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
 //                     blonde, icons, kongfall, gameover, bananas, pointer (the kong finder), win, reach,
-//                     midway, start, perches, popin
-//   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
+//                     midway, start, perches, popin, perf
+//   mission=<file>    data/missions/<file> (default: patrol.xml, a plain patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
 //   secs=<n>          how long scenarios that run for a while run
@@ -39,6 +39,7 @@ const num = (k: string, d: number): number => {
 // The internals the scenarios poke at (private in the game's types).
 interface MissionInternals {
   update(msecs: number, input: Input | null): void;
+  draw(display: typeof import('./core/display.ts').display, msecs: number): void;
   patrol: Area;
   lives: number;
   crashTimer: number;
@@ -150,6 +151,57 @@ export class Harness {
 type Scenario = (h: Harness) => void | Promise<void>;
 
 const SCENARIOS: Record<string, Scenario> = {
+  /** How long frames take: flies straight on (it can't crash), firing,
+   *  for `secs` (default 20) of 33 ms frames and times the game's update
+   *  and its drawing apart (with `finish=1` the drawing waits for the GPU:
+   *  slow and only roughly meaningful with headless software WebGL, where
+   *  the draw calls and triangles are the numbers to compare). `turn=1`
+   *  holds the stick over, so new city keeps coming. */
+  perf(h) {
+    h.plane.charmed = true;
+    h.input.setButton(Button.FIRE1, true);
+    if (num('turn', 0)) h.input.axis.x = 0.15;
+    const renderer = display.renderer;
+    const gl = renderer.getContext();
+    const finish = !!num('finish', 0);
+    renderer.info.autoReset = false;
+    const frames = Math.round(num('secs', 20) * 30);
+    const update: number[] = [];
+    const draw: number[] = [];
+    let calls = 0;
+    let triangles = 0;
+    let maxCalls = 0;
+    for (let i = 0; i < frames; i++) {
+      renderer.info.reset();
+      display.beginFrame();
+      const t0 = performance.now();
+      h.internals.update(33, h.input);
+      const t1 = performance.now();
+      h.internals.draw(display, 33);
+      if (finish) gl.finish();
+      const t2 = performance.now();
+      h.t += 33;
+      update.push(t1 - t0);
+      draw.push(t2 - t1);
+      calls += renderer.info.render.calls;
+      maxCalls = Math.max(maxCalls, renderer.info.render.calls);
+      triangles += renderer.info.render.triangles;
+      if (i % 150 === 149) h.frame(`frame ${i + 1}`, 1, 1, 320);
+    }
+    renderer.info.autoReset = true;
+    h.input.setButton(Button.FIRE1, false);
+    const stats = (a: number[]): string => {
+      const s = [...a].sort((x, y) => x - y);
+      const mean = a.reduce((x, y) => x + y, 0) / a.length;
+      return `mean ${mean.toFixed(2)} ms, median ${s[s.length >> 1].toFixed(2)}, 95% ${s[Math.floor(s.length * 0.95)].toFixed(2)}, worst ${s[s.length - 1].toFixed(2)}`;
+    };
+    h.log(`${frames} frames, ${h.kongs().length} kongs, ${h.world.entities.length} entities at the end`);
+    h.log(`update: ${stats(update)}`);
+    h.log(`draw${finish ? ' (to the GPU finishing)' : ''}: ${stats(draw)}`);
+    h.log(`draw calls: ${(calls / frames).toFixed(0)} a frame (most ${maxCalls}); triangles: ${(triangles / frames / 1000).toFixed(0)}k a frame`);
+    h.log(`memory: ${renderer.info.memory.geometries} geometries, ${renderer.info.memory.textures} textures`);
+  },
+
   /** Kongs throwing bananas (use mission=survive1.xml or survive2.xml):
    *  fly straight on, not dodging, for `secs` (default 12), a frame each
    *  second (drawn every step: kongs only throw when on screen). Checks
@@ -233,7 +285,7 @@ const SCENARIOS: Record<string, Scenario> = {
     h.check(offscreen === 0, 'no kong is hit off screen');
   },
 
-  /** The kong finder (use mission=killmonkeys.xml or clear.xml: a fixed
+  /** The kong finder (use mission=killmonkeys.xml: a fixed
    *  number): its head and "!" over each kong on screen, or on the edge
    *  of the screen with an arrow. Waits for a kong to climb (climbs made
    *  certain), then puts the plane `dist` (default 700) from it, facing
@@ -615,7 +667,7 @@ async function main(): Promise<void> {
   await loadFont();
   const name = params.get('scenario') ?? 'hud';
   const scenario = SCENARIOS[name];
-  const mission = new Mission(params.get('mission') ?? 'claw.xml');
+  const mission = new Mission(params.get('mission') ?? 'patrol.xml');
   await mission.load();
   const h = new Harness(mission, canvas);
   (window as unknown as { gametest: Harness }).gametest = h;

@@ -1,5 +1,5 @@
 // InputManager + keyboard/gamepad devices filling an Input struct (axis +
-// buttons + throttle), and the InputFilter/MenuFilter that read it.
+// buttons + throttle).
 
 // NEXT: a tap or click on the game screen (moves story dialogue on).
 // QUIT (Esc) now opens the pause menu rather than quitting straight away.
@@ -9,7 +9,7 @@ const NUM_BUTTONS = 5;
 
 // Starting throttle: halfway between game.properties' min and max speeds
 // (which go by altitude).
-export const DEFAULT_THROTTLE = 0.5;
+const DEFAULT_THROTTLE = 0.5;
 // Keyboard/gamepad throttle change, per second held.
 const THROTTLE_RATE = 0.5;
 
@@ -69,7 +69,6 @@ class Keyboard implements InputDevice {
   }
 
   private onKey = (e: KeyboardEvent): void => {
-    if (e.target instanceof HTMLElement && e.target.closest('.lil-gui')) return;
     const pressed = e.type === 'keydown';
     const b = KEYS[e.code];
     if (b !== undefined) {
@@ -198,30 +197,4 @@ export class InputManager {
   }
 
   dispose(): void { for (const d of this.devices) d.dispose(); }
-}
-
-/** Reads the requests common to every component (quit) from the Input. */
-export class InputFilter {
-  requestQuit = false;
-
-  read(input: Input): void {
-    this.requestQuit = input.buttonPressed(Button.QUIT);
-    this._read(input);
-  }
-
-  protected _read(_input: Input): void {}
-
-  quit(): boolean { return this.requestQuit; }
-}
-
-/** Input for menus and non-interactive components. Skipping is off for now. */
-export class MenuFilter extends InputFilter {
-  requestSkip = false;
-  okPressed = false;
-
-  protected override _read(input: Input): void {
-    this.okPressed = input.buttonPressed(Button.FIRE1);
-  }
-
-  skip(): boolean { return this.requestSkip; }
 }

@@ -4,26 +4,25 @@
 
 **[Play it in your browser](https://davmlaw.github.io/federal-monkey-patrol/)**
 
-A 3D game from 2004–2006. Giant apes are attacking the city. Harlow, a disgraced ex-army pilot who runs the forgotten Federal Monkey Patrol, takes the janitor's biplane and flies through a procedurally generated city to shoot monkeys and rescue blondes. Fly above the skyscrapers and shooting gets easier, but stay up there too long and The Giant Claw comes for you.
+A game started in 2004–2006 and finished for the web in 2026. Giant apes are attacking the city. Harlow, a disgraced ex-army pilot who runs the forgotten Federal Monkey Patrol, takes the janitor's biplane and flies through a procedurally generated 1930s New York to shoot kongs and rescue blondes.
 
-Design notes are in [game.txt](game.txt), and the author's TODO list is in [todo.html](todo.html).
-
-It was written in C++ with OpenGL and SDL 1.2, and has been ported to the browser in TypeScript with [Three.js](https://threejs.org/). The first commit in the history is the 2002–2003 prototype, which used GLUT and ODE.
+The original was written in C++ with OpenGL and SDL 1.2. This version is TypeScript with [Three.js](https://threejs.org/), built with Vite and deployed to GitHub Pages. The design notes from 2006 are in [game.txt](game.txt), and the author's TODO list of the time is in [todo.html](todo.html).
 
 ## What's in it
 
-The browser version recreates what the 2006 version actually did, using the original models, textures, story scripts and missions in `data/`:
-
-- **The story**: `data/federal_monkey_patrol.game` plays the film leader, the intro and the four story chapters, with the original transitions (fade, spin, star wipe, angled wipes). The missions were commented out of the story in 2006, because their win conditions (monkey kills, blonde rescues) couldn't be met yet.
-- **Missions**, played on their own: the procedurally generated city, the biplane and its guns, the HUD (FPS, countdown timer) and the XML outcome system.
-- **Two flying modes**, switched with a button: *follow* (pitch and turn, the chase camera from 2006) and *top-down* (level flight seen from above, sliding left and right like 1942). The design in `game.txt` switched modes by height; for now it's a button.
-- **On-screen controls** for touch screens (or a mouse): a stick, a throttle lever, fire, mode switch and quit.
-
-Some things were written but switched off in 2006, and are still off: the Giant Claw meter and the skip key. Monkeys, blondes and collisions were never implemented. In 2006 the plane's forward speed was commented out, so it turned on the spot; the browser version adds a throttle (starting at 60%, the speed in that commented-out line), and the city scrolls with the plane as the C++ `PatchGrid` was written to.
+- **The story** (`data/federal_monkey_patrol.game`): five missions with short flashback cutscenes between them, under an old-movie look.
+  1. *Kill 3 Kongs*: three kongs in the patrol area.
+  2. *Survive*: top-down, kongs on the roofs throwing bananas.
+  3. *Save 3 Blondes*: kongs carry blondes up the skyscrapers; shoot the kong and catch her as she floats down.
+  4. *Survive Again*: top-down with steering.
+  5. *Save 3 Blondes, Lose None, Kill 5 Kongs*: everything at once, against the clock.
+- **Free play**: the last mission with no goal or clock, and two top-down rooftop modes.
+- **The city**: generated from a fixed seed, so it's always the same city; patches of it are built round the plane as it flies, with a simpler version of each building further away.
+- **Kongs and blondes**: the 2006 models, rigged and animated procedurally (walking, climbing, chest-beating, falling).
 
 ### Game files
 
-Pick one from the menu, or link to it with `?game=`:
+Pick one from the menu, or link to it with `?game=` (and `&mission=N` to start the story at its Nth mission):
 
 | Link | What it plays |
 |---|---|
@@ -36,15 +35,14 @@ Pick one from the menu, or link to it with `?game=`:
 
 | Key | Action |
 |---|---|
-| Arrow keys / stick | Follow mode: pitch and turn (up pitches the nose down, like a plane). Top-down mode: slide left/right, speed up/slow down |
+| Arrow keys / stick | Pitch and turn (up pitches the nose down, like a plane). Top-down missions: slide or steer left/right, up/down change speed |
 | W / S (or + / −, PgUp / PgDn) | Throttle |
-| Space / Enter | Fire forward |
-| M or Tab | Switch flying mode (follow / top-down) |
-| Esc | Quit |
+| Space / Enter | Fire; in the story, on to the next line |
+| Esc | Pause |
 
-A gamepad works too: left stick, A/B to fire, Y to switch mode, and the triggers for throttle.
+A gamepad works too: left stick, A/B to fire, and the triggers for the throttle.
 
-On a touch screen the on-screen controls appear during missions: the stick bottom-left, and the throttle, mode button and FIRE on the right. The throttle stays where you leave it.
+On a touch screen the on-screen controls appear during missions: the stick bottom-left, and the throttle and FIRE on the right. The throttle stays where you leave it.
 
 ## Running locally
 
@@ -53,14 +51,26 @@ Needs Node.js 20 or later.
 ```sh
 npm install
 npm run dev       # http://localhost:5173
-npm run build     # static site in dist/
+npm run build     # type-checks, then builds the static site in dist/
 ```
 
 Pushes to `main` are built and deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
+### Checking changes
+
+There are no unit tests beyond the type check. The game is checked by running it in a headless browser:
+
+```sh
+npm run shoot -- 'gametest.html?scenario=blonde&catch=1'      # a scripted scenario, with pass/fail checks
+npm run shoot -- 'gametest.html?scenario=perf&mission=freeplay.xml'   # frame times, draw calls, triangles
+npm run shoot -- 'kongtest.html?sheet=walk&views=side,front'  # a contact sheet of an animation
+```
+
+`gametest.html` (`src/gametest.ts`) loads a mission without the menu and runs a scenario in game time; `kongtest.html` (`src/kongtest.ts`) is a viewer for the kong's and blonde's animations. See [CLAUDE.md](CLAUDE.md) for the details and the layout of the code.
+
 ## The 2006 C++ version
 
-The original source is in [`legacy/`](legacy/), and the tag [`v2006-native`](https://github.com/davmlaw/federal-monkey-patrol/releases/tag/v2006-native) has the repo as it was before the port. See [legacy/README.md](legacy/README.md) for building it (SDL 1.2, libxml2, VS2005 for Windows).
+The original source is in [`legacy/`](legacy/), and the tag [`v2006-native`](https://github.com/davmlaw/federal-monkey-patrol/releases/tag/v2006-native) has the repo as it was before the port, including the original data files (the longer 2006 cutscenes, the Giant Claw art, textures and models) that the web version no longer uses. See [legacy/README.md](legacy/README.md) for building it (SDL 1.2, libxml2, VS2005 for Windows).
 
 ## Credits
 

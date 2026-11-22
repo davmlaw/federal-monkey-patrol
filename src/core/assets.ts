@@ -181,12 +181,11 @@ export interface SoundHandle { done: boolean; stop(): void }
 
 /** Play a decoded buffer. Returns a handle whose .done turns true at the end.
  *  `rate` < 1 plays it slower and deeper; `bassDb` boosts below `BASS_HZ`. */
-export function playSound(buffer: AudioBuffer | null, { loop = false, volume = 1, rate = 1, bassDb = 0 } = {}): SoundHandle {
+export function playSound(buffer: AudioBuffer | null, { volume = 1, rate = 1, bassDb = 0 } = {}): SoundHandle {
   const handle: SoundHandle = { done: true, stop() {} };
   if (!audioCtx || !buffer) return handle;
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
-  src.loop = loop;
   src.playbackRate.value = rate;
   let out: AudioNode = src;
   if (bassDb) {

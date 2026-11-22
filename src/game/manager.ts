@@ -2,16 +2,16 @@
 //
 // A .game file lists components, one per line:
 //   blank <rrggbb> | picture <file> [msecs] [rrggbb] [film] | storyteller <file.shot>
-//   mission <file.xml> | music <file> | card <msecs> <text, | for a new line>
-//   transition <type> <msecs>
+//   mission <file.xml> | card <msecs> <text, | for a new line>
+//   transition <fade|spin> <msecs>
 // A transition links the component before it to the one after it.
 
 import { readLines } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
-import { MenuFilter, type Input } from '../core/input.ts';
+import type { Input } from '../core/input.ts';
 import { hexcolor } from '../core/settings.ts';
 import { GameComponent, Status } from './component.ts';
-import { Blank, Picture, SoundTrack, TitleCard } from './simple.ts';
+import { Blank, Picture, TitleCard } from './simple.ts';
 import { StoryTeller } from './storyteller.ts';
 import { makeTransition, Transition } from './transition.ts';
 import { Mission } from '../mission/mission.ts';
@@ -26,7 +26,6 @@ export class GameManager extends GameComponent {
   private transition: Transition | null = null;
   private lastComponent: GameComponent | null = null;
   current = 0;
-  private menu = new MenuFilter();
 
   static async fromFile(filename: string): Promise<GameManager> {
     const gm = new GameManager();
@@ -80,10 +79,6 @@ export class GameManager extends GameComponent {
         if (col) p.setColor(col[0], col[1], col[2]);
       }
       gc = p;
-    } else if (component === 'music') {
-      const m = new SoundTrack();
-      m.setFilename(words[1]);
-      gc = m;
     } else {
       throw new Error(`${err} invalid line`);
     }
@@ -132,17 +127,15 @@ export class GameManager extends GameComponent {
     this.prefetch();
     const current = this.currentComponent();
     display.clearDepth();
-    this.menu.read(input);
     current.play(display, msecs, input);
 
     const s = current.getStatus();
     // (Esc doesn't quit here: main.ts turns it into the pause menu.)
     if (s === Status.QUIT) {
       this.status = Status.QUIT;
-    } else if (this.menu.skip() || (current.loaded && s === Status.NEXT)) {
+    } else if (current.loaded && s === Status.NEXT) {
       this.advance();
     } else if (s === Status.LOST) {
-      console.log('LOSTY WOSTY!');
       this.status = Status.QUIT;
     }
   }
@@ -156,11 +149,6 @@ export class GameManager extends GameComponent {
     // free things two steps behind.
     const stale = this.components[old - 1];
     if (stale) this.release(stale);
-  }
-
-  /** True if a mission comes later in the sequence. */
-  hasMissionAhead(): boolean {
-    return this.components.some((c, i) => i > this.current && c instanceof Mission);
   }
 
   /** Start at the `n`th mission (1-based), at the title card before it if

@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 
-export const TILE = 512; // pixels
+const TILE = 512; // pixels
 export const BAYS = 4; // bays across and floors down one tile
 const B = TILE / BAYS; // pixels per bay
 
@@ -369,7 +369,7 @@ const PAINTERS: ((ctx: Ctx, r: Rng) => void)[] = [
 let facadeTexture: THREE.DataArrayTexture | null = null;
 
 /** The facade texture array (built once). */
-export function facadeArray(): THREE.DataArrayTexture {
+function facadeArray(): THREE.DataArrayTexture {
   if (facadeTexture) return facadeTexture;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = TILE;

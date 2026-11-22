@@ -1,11 +1,11 @@
-// HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
-// TurnBack, KongPointer, IconTally, KissPop, Banner, and the "generating
+// HUD widgets: FogPlane, CountDownTimer, LivesDisplay, Radar, TurnBack,
+// Finder, IconTally, KissPop, Banner, and the "generating
 // skyscrapers" LoadBar.
 
 import * as THREE from 'three';
 import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
 import {
-  Container2D, Drawable2D, Image, LEFT, Quad, Text2D, Transitional2D, textHeight, textWidth, type Batch2D, type Color, type Point,
+  Drawable2D, Image, Quad, Text2D, Transitional2D, textHeight, textWidth, type Batch2D, type Color, type Point,
 } from '../core/draw2d.ts';
 import { loadProperties, hexcolor, type RGBA } from '../core/settings.ts';
 import { MTRand } from '../core/mtrand.ts';
@@ -51,34 +51,6 @@ export class CountDownTimer extends Drawable2D {
 
   protected override representation(g: Batch2D, alpha: number): void {
     new Text2D(`${this.label} ${clockString(this.timeRemaining)}`, this.font).draw(g, alpha);
-  }
-}
-
-const BARH = 0.01;
-
-/** The Giant Claw meter. Nothing updates its state yet, so it stays at 0,
- *  and at 0 nothing is drawn. */
-export class ClawAlert extends Transitional2D {
-  private line: Quad;
-
-  private constructor(w: number, h: number, private chart: Image) {
-    super(w, h);
-    this.line = new Quad(w, h * BARH);
-    this.line.setColor(1, 0, 0);
-  }
-
-  static async create(w: number, h: number): Promise<ClawAlert> {
-    return new ClawAlert(w, h, await Image.load('data/images/menu/claw_alert.jpg', w * 0.95, h));
-  }
-
-  protected override representation(g: Batch2D, alpha: number): void {
-    if (this.getState() <= 0) return;
-    this.chart.draw(g, alpha);
-    const mid = (this.getState() - 0.5) * this.getHeight();
-    this.line.position.y = mid - BARH * this.getHeight();
-    this.line.draw(g, alpha);
-    this.line.position.y = mid + BARH * this.getHeight();
-    this.line.draw(g, alpha);
   }
 }
 
@@ -147,7 +119,6 @@ export function blondeIconTexture(): THREE.Texture {
   return blondeIcon;
 }
 
-/** Something to show on the radar, in world coordinates. */
 /** A dot on the radar: a kong, or (`blonde`) one carrying a blonde, or
  *  a blonde falling. */
 export interface Blip { x: number; z: number; kind?: 'kong' | 'carrying' | 'blonde' }
@@ -311,7 +282,7 @@ export function kongFinderIcon(portrait: THREE.Texture): THREE.Texture {
 }
 
 /** Arrow colours for a Finder. */
-export const FINDER_GOLD: Color = [0.95, 0.76, 0.19, 1];
+const FINDER_GOLD: Color = [0.95, 0.76, 0.19, 1];
 export const FINDER_RED: Color = [1, 0.4, 0.25, 1];
 
 /**

@@ -107,8 +107,6 @@ kbd {
 
 pre { white-space: pre-wrap; color: #f88; }
 
-.lil-gui.tuner { --width: 320px; }
-
 /* ------------------------------------------------ on-screen flight controls */
 
 #touch {
@@ -305,8 +303,6 @@ pre { white-space: pre-wrap; color: #f88; }
 #stage .picture img { width: 100%; height: 100%; object-fit: fill; display: block; }
 
 #stage .picture .tint { position: absolute; inset: 0; mix-blend-mode: multiply; }
-
-#stage .outline svg { display: block; overflow: visible; }
 
 #stage .story { background: #000; }
 

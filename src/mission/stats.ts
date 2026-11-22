@@ -5,17 +5,13 @@ export const Stat = {
   GAME_SECONDS: 1,
   PLAYER_DEATHS: 2,
   BULLETS_FIRED: 3,
-  BOMBS_DROPPED: 4,
-  MONKEY_DEATHS: 5,
-  MONKEY_POPULATION: 6,
-  BLONDE_RESCUES: 7,
-  BLONDE_CASUALTIES: 8,
-  BUILDINGS_DESTROYED: 9,
+  MONKEY_DEATHS: 4,
+  MONKEY_POPULATION: 5,
+  BLONDE_RESCUES: 6,
+  BLONDE_CASUALTIES: 7,
 } as const;
 export type Stat = (typeof Stat)[keyof typeof Stat];
 const NAMES = Object.keys(Stat);
-
-export function statName(i: Stat): string { return NAMES[i] ?? ''; }
 
 export function statFromName(name: string): Stat {
   const i = NAMES.indexOf(String(name).toUpperCase());

@@ -1,7 +1,6 @@
-// Blank, Picture and SoundTrack components. Blank and Picture are HTML
-// layers on the stage (see stage.ts) rather than WebGL quads.
+// Blank, Picture and TitleCard components: HTML layers on the stage (see
+// stage.ts) rather than WebGL quads.
 
-import { loadSound, playSound, type SoundHandle } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
 import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from './component.ts';
@@ -123,33 +122,4 @@ export function cardLayer(text: string, note = ''): Card {
   const film = new FilmGrain({ ...SEPIA_FILM, weave: layer.firstElementChild as HTMLElement });
   layer.append(film.el);
   return { layer, update: () => film.update() };
-}
-
-/**
- * `music <file>`: starts the named file (relative to data/sound/music/)
- * looping, and moves on.
- */
-let currentMusic: SoundHandle | null = null;
-
-export class SoundTrack extends GameComponent {
-  private filename = '';
-  private buffer: AudioBuffer | null = null;
-
-  setFilename(f: string): void { this.filename = f; }
-
-  protected override async _load(): Promise<void> {
-    this.buffer = await loadSound(`data/sound/music/${this.filename}`);
-  }
-
-  protected override _play(): void {
-    console.log(`playing '${this.filename}'`);
-    currentMusic?.stop();
-    currentMusic = playSound(this.buffer, { loop: true });
-    this.status = Status.NEXT;
-  }
-}
-
-export function stopMusic(): void {
-  currentMusic?.stop();
-  currentMusic = null;
 }

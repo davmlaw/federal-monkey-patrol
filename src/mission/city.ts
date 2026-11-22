@@ -17,9 +17,9 @@ const STREET_WIDTH_RATIO = 0.235;
 
 export const BLOCKSIZE = 400.0;
 const BLOCKSPERPATCH = 8;
-export const PATCHES = 8;
+const PATCHES = 8;
 const CHILD_LENGTH = BLOCKSIZE * BLOCKSPERPATCH; // one patch
-export const CITY_LENGTH = CHILD_LENGTH * PATCHES;
+const CITY_LENGTH = CHILD_LENGTH * PATCHES;
 
 const NORTH_BIT = 1 << 0;
 const EAST_BIT = 1 << 1;
@@ -36,9 +36,9 @@ const mt = new MTRand(42);
 interface Spot { x: number; z: number }
 
 /** A lot from the generator: centre (x, z), size w (x) by l (z), height h. */
-export interface LotData extends Spot { w: number; h: number; l: number; floors: number; invWin: number }
+interface LotData extends Spot { w: number; h: number; l: number; floors: number; invWin: number }
 
-export interface SkyscraperData extends Spot {
+interface SkyscraperData extends Spot {
   w: number;
   windowSize: number;
   /** Alternating vertical (floors) and horizontal (inset) steps. */
@@ -48,18 +48,16 @@ export interface SkyscraperData extends Spot {
   crown?: Crown;
 }
 
-export interface RoofData extends Spot { y: number; w: number; l: number }
-export interface ParkData extends Spot { w: number; l: number }
-export interface BlockData extends Spot { park: boolean }
+interface ParkData extends Spot { w: number; l: number }
+interface BlockData extends Spot { park: boolean }
 
 /** A cross tree: centre (x, y, z), size w x h, turned rot degrees, texture
  *  index tex, tinted by g (optional). */
-export interface TreeData extends Spot { y: number; w: number; h: number; rot?: number; tex: number; g?: number }
+interface TreeData extends Spot { y: number; w: number; h: number; rot?: number; tex: number; g?: number }
 
-export interface PatchData {
+interface PatchData {
   buildings: LotData[];
   skyscrapers: SkyscraperData[];
-  roofs: RoofData[];
   parks: ParkData[];
   trees: TreeData[];
   blocks: BlockData[];
@@ -110,8 +108,6 @@ function subdivideBlock(out: PatchData, pos: Spot, xSpan: number, zSpan: number,
   // stop subdividing if not enough space
   if (shortest < 2 * MIN_BUILDING_WIDTH) {
     building(out, xSpan, height, zSpan, pos);
-    // (unused: roofs are drawn with the buildings)
-    out.roofs.push({ x: pos.x, y: height, z: pos.z, w: xSpan, l: zSpan });
     return;
   }
   if (mt.rand() * 100.0 < SKYSCRAPER_CHANCE) {
@@ -224,8 +220,8 @@ function parkland(out: PatchData, xLength: number, zLength: number, px: number, 
 }
 
 /** Generate one patch's contents, centred on (cx, cz). */
-export function generatePatch(cx: number, cz: number): PatchData {
-  const out: PatchData = { buildings: [], skyscrapers: [], roofs: [], parks: [], trees: [], blocks: [] };
+function generatePatch(cx: number, cz: number): PatchData {
+  const out: PatchData = { buildings: [], skyscrapers: [], parks: [], trees: [], blocks: [] };
   cityGenerator(out, CHILD_LENGTH, BLOCKSIZE, cx, cz);
   return out;
 }
@@ -655,10 +651,10 @@ function addMidrise(fb: Builder, trimBuilder: Builder, lot: Lot, lotHeight: numb
 
 // ======================================================= skyscrapers
 
-export const Crown = {
+const Crown = {
   FLAT: 'flat', DECO: 'deco', EMPIRE: 'empire', CHRYSLER: 'chrysler', GOTHIC: 'gothic', TEMPLE: 'temple',
 } as const;
-export type Crown = (typeof Crown)[keyof typeof Crown];
+type Crown = (typeof Crown)[keyof typeof Crown];
 
 /**
  * A 1916-zoning-law skyscraper: a podium filling the lot, a few setbacks,
@@ -1105,7 +1101,7 @@ interface Patch {
 /** Everything a patch always has: grass, trees, and the far (lite)
  *  version of its buildings, with the boxes the buildings collide with
  *  (taken from the lite version, whose walls go down to the street). */
-export function buildPatchBase(data: PatchData, materials: CityMaterials): { group: THREE.Group; trees: THREE.Group; far: THREE.Group; boxes: Box[] } {
+function buildPatchBase(data: PatchData, materials: CityMaterials): { group: THREE.Group; trees: THREE.Group; far: THREE.Group; boxes: Box[] } {
   const group = new THREE.Group();
   const add = (parent: THREE.Object3D, geom: THREE.BufferGeometry | null, mat: THREE.Material): THREE.Mesh | null => {
     if (!geom) return null;
@@ -1137,7 +1133,7 @@ export function buildPatchBase(data: PatchData, materials: CityMaterials): { gro
 
 /** The near (full detail) version of a patch's buildings, with the street
  *  furniture. */
-export function buildPatchNear(data: PatchData, materials: CityMaterials, cx: number, cz: number): PatchNear {
+function buildPatchNear(data: PatchData, materials: CityMaterials, cx: number, cz: number): PatchNear {
   const group = new THREE.Group();
   const fb = new GeomBuilder();
   const trim = new GeomBuilder();
@@ -1165,7 +1161,7 @@ function disposeGroup(group: THREE.Object3D, materials: CityMaterials): void {
  * The ground: one subdivided quad across the whole grid, with the street
  * tile once per block, drawn first without depth testing.
  */
-export function buildGround(materials: CityMaterials): THREE.Mesh {
+function buildGround(materials: CityMaterials): THREE.Mesh {
   const side = CITY_LENGTH;
   const subdivisions = 16;
   const repeats = PATCHES * BLOCKSPERPATCH;

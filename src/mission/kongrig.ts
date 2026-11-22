@@ -107,7 +107,7 @@ function mapFrame(d0: THREE.Vector3, n0: THREE.Vector3, d: THREE.Vector3, n: THR
 export const euler = (x: number, y: number, z: number): THREE.Quaternion =>
   new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'YXZ'));
 
-export const frac = (x: number): number => x - Math.floor(x);
+const frac = (x: number): number => x - Math.floor(x);
 export const smooth = (x: number): number => {
   const t = THREE.MathUtils.clamp(x, 0, 1);
   return t * t * (3 - 2 * t);
@@ -116,7 +116,7 @@ export const smooth = (x: number): number => {
 /** A foot (or hand) going round a step cycle of phase 0..1: on the ground
  *  for the first `stance` of it, sliding back by `stance` strides, then
  *  lifted and swung forward. `along` runs +stance/2 .. -stance/2. */
-export function stepCycle(phase: number, stance = 0.6): { along: number; lift: number } {
+function stepCycle(phase: number, stance = 0.6): { along: number; lift: number } {
   const f = frac(phase);
   if (f < stance) return { along: stance * (0.5 - f / stance), lift: 0 };
   const s = (f - stance) / (1 - stance);

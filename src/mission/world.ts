@@ -3,9 +3,8 @@
 // CameraMan with its chase camera.
 
 import * as THREE from 'three';
-import { loadModel, loadTextureVariant, clampTexture, playGunshot, playRicochet, playThud } from '../core/assets.ts';
-import { loadProperties } from '../core/settings.ts';
-import { Button, InputFilter, type Axis, type Input } from '../core/input.ts';
+import { loadModel, playGunshot, playRicochet, playThud } from '../core/assets.ts';
+import { Button, type Axis, type Input } from '../core/input.ts';
 import type { Display } from '../core/display.ts';
 import { gamestats, Stat } from './stats.ts';
 import type { CityGrid, Hit } from './city.ts';
@@ -77,12 +76,6 @@ export class Entity {
     this._update(world, msecs);
   }
 
-  /** Degrees, about the entity's own axes. */
-  rotate(x: number, y: number, z: number): void {
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x * deg2rad, y * deg2rad, z * deg2rad, 'XYZ'));
-    this.object.quaternion.multiply(q);
-  }
-
   protected _update(_world: World, _msecs: number): void {}
 
   /** Ran into the city, or into `target` (a shootable entity), at
@@ -93,10 +86,6 @@ export class Entity {
    *  first touches this one, or null if it misses. */
   intersect(_p0: THREE.Vector3, _p1: THREE.Vector3, _radius: number): Hit | null { return null; }
 
-  /** Shootable entities: distance from `point` to the surface (negative
-   *  inside), for blasts. */
-  distanceTo(_point: THREE.Vector3): number { return Infinity; }
-
   /** Shootable entities: hit for `damage` at `hit`, by something going at
    *  `velocity`. */
   struck(_world: World, _hit: Hit, _velocity: THREE.Vector3, _damage: number): void {}
@@ -104,42 +93,6 @@ export class Entity {
   /** Shootable entities still standing: the point top-down bullets curve
    *  down to, and how close (across the ground) they must pass to hit. */
   aim(): { point: THREE.Vector3; radius: number } | null { return null; }
-}
-
-// data/etc/projectiles/<type>.properties -> projectile type
-interface ProjectileType {
-  make: (() => THREE.Object3D) | null;
-  lifetime: number;
-  gravity: number;
-  airResistance: number;
-}
-
-const projectileTypes = new Map<string, Promise<ProjectileType>>();
-
-async function loadProjectileType(type: string): Promise<ProjectileType> {
-  if (!projectileTypes.has(type)) {
-    projectileTypes.set(type, (async () => {
-      console.log(`trying to load '${type}' from disk`);
-      const prop = await loadProperties(`data/etc/projectiles/${type}.properties`);
-      const words = (prop.get('drawable') || '').split(' ');
-      let make: (() => THREE.Object3D) | null = null;
-      if (words.length >= 3 && words[0] === 'MDL') {
-        const proto = await loadModel(words[1], words[2]);
-        make = () => proto.clone();
-      } else if (words.length >= 2 && words[0] === 'BB') {
-        const map = await loadTextureVariant(`data/images/billboards/${words[1]}`, clampTexture);
-        const mat = new THREE.SpriteMaterial({ map, depthWrite: false });
-        make = () => { const s = new THREE.Sprite(mat); s.scale.set(10, 10, 1); return s; };
-      }
-      return {
-        make,
-        lifetime: parseFloat(prop.get('lifetime') ?? '') || 0,
-        gravity: parseFloat(prop.get('gravity') ?? '') || 0,
-        airResistance: parseFloat(prop.get('air_resistance') ?? '') || 0,
-      };
-    })());
-  }
-  return projectileTypes.get(type)!;
 }
 
 // Damage to shootable things (a kong takes kong.properties' health_min to
@@ -151,7 +104,6 @@ const BULLET_DAMAGE = 1;
 const FLAT_CURVE = 0.5;
 
 export class Projectile extends Entity {
-  lifetime: number;
   /**
    * A top-down bullet: the game is 2D from up there, so it flies level
    * through (over) the city with `velocity` in world space, hits whatever
@@ -162,13 +114,11 @@ export class Projectile extends Entity {
   /** A flat bullet goes this far over the map (world units) and is gone. */
   range = Infinity;
 
-  constructor(ptype: ProjectileType) {
-    // (a type with no drawable throws here, as it always has)
-    const mesh = ptype.make!();
+  /** `model`: what it looks like (cloned); gone after `lifetime` msecs. */
+  constructor(model: THREE.Object3D, private lifetime: number) {
     const holder = new THREE.Group();
-    holder.add(mesh);
+    holder.add(model.clone());
     super(holder);
-    this.lifetime = ptype.lifetime;
     this.radius = 0;
   }
 
@@ -183,8 +133,6 @@ export class Projectile extends Entity {
       playRicochet(0.3 * volume);
     }
   }
-
-  setLifetime(ms: number): void { this.lifetime = ms; }
 
   override update(world: World, msecs: number): void {
     if (!this.flat) {
@@ -239,10 +187,8 @@ export class Projectile extends Entity {
   }
 
   protected override _update(_world: World, msecs: number): void {
-    if (this.lifetime) {
-      this.lifetime -= msecs;
-      if (this.lifetime <= 0) this.dead = true;
-    }
+    this.lifetime -= msecs;
+    if (this.lifetime <= 0) this.dead = true;
   }
 }
 
@@ -250,6 +196,8 @@ export class Projectile extends Entity {
 // long: a range of a few blocks. (2006: 150 units/s for a second, which the
 // plane outran at any speed, so they never reached the buildings.)
 const BULLET_SPEED = 1500;
+const BULLET_MODEL = 'bomb.obj'; // (tiny: the 2006 bomb, scaled right down)
+const BULLET_SKIN = 'gray.png';
 const BULLET_MSECS = 1000;
 // Top-down bullets only hit what's on screen or a little past its edge
 // (VIEW_MARGIN: 1 is the edge, in half-screens from the middle), so they
@@ -337,7 +285,8 @@ export class Plane extends Entity {
   /** Can't crash (the mission is over). */
   charmed = false;
 
-  constructor(object: THREE.Object3D, private bombType: ProjectileType) {
+  /** `bullet`: the bullets' model. */
+  constructor(object: THREE.Object3D, private bullet: THREE.Object3D) {
     super(object);
     this.radius = PLANE_RADIUS;
   }
@@ -373,13 +322,12 @@ export class Plane extends Entity {
     const flat = this.flatShots;
     const movement = new THREE.Vector3(0, 0, -BULLET_SPEED);
     gamestats.inc(Stat.BULLETS_FIRED);
-    // Every bullet uses the bomb model (a hack from 2006).
     // bullets from guns either side of the nose
     const q = this.object.quaternion;
     const offset = new THREE.Vector3(GUN_SPREAD, 0, 0).applyQuaternion(q);
     const ahead = new THREE.Vector3(0, 0, -GUN_AHEAD).applyQuaternion(q);
     for (const sign of [-1, 1]) {
-      const bomb = new Projectile(this.bombType);
+      const bomb = new Projectile(this.bullet, BULLET_MSECS);
       bomb.object.scale.setScalar(0.005);
       bomb.object.position.copy(this.object.position).add(ahead).addScaledVector(offset, sign);
       bomb.object.quaternion.copy(this.object.quaternion);
@@ -391,7 +339,6 @@ export class Plane extends Entity {
         bomb.radius = null; // over the buildings, not into them
         bomb.range = FLAT_BULLET_RANGE;
       }
-      bomb.setLifetime(BULLET_MSECS);
       world.addEntity(bomb);
     }
     playGunshot();
@@ -404,7 +351,7 @@ export class Plane extends Entity {
  * pitches (inverted, like a plane), left/right turns, and the plane flies
  * forward at the throttle speed. In 2006 the speed was always zero.
  */
-export class FollowPlaneFilter extends InputFilter implements Controller {
+export class FollowPlaneFilter implements Controller {
   axis: Axis = { x: 0, y: 0 };
   firing = 0;
   speed = 0;
@@ -421,7 +368,8 @@ export class FollowPlaneFilter extends InputFilter implements Controller {
     this.pitchRate = 0;
   }
 
-  protected override _read(input: Input): void {
+  /** Take the stick and the trigger from `input`. */
+  read(input: Input): void {
     this.axis = input.getAxis();
     this.firing = input.buttonPressed(Button.FIRE1) ? 1 : 0;
   }
@@ -564,8 +512,7 @@ export class Player {
     object.add(bank);
     object.position.set(0, startHeight, 0);
     object.scale.setScalar(0.01);
-    const bombType = await loadProjectileType('bomb');
-    const p = new Player(new Plane(object, bombType));
+    const p = new Player(new Plane(object, await loadModel(BULLET_MODEL, BULLET_SKIN)));
     p.entity.bank = bank;
     p.entity.propeller = propeller;
     p.setMode(FlyMode.FOLLOW);
@@ -711,7 +658,7 @@ const FOG_START = 50.0;
 const FOG_END = 11000.0;
 export const FOG_COLOR: readonly [number, number, number] = [0.8, 0.8, 0.8];
 
-// sounds (bullet hits, bombs) fade out at this distance from the camera
+// sounds (bullet hits) fade out at this distance from the camera
 const HEARING_RANGE = 1800;
 
 export class World {

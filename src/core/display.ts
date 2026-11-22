@@ -33,12 +33,8 @@ export class Display {
   gpu = '';
   software = false;
   g!: Batch2D;
-  /** The render target being drawn into (null: the screen). */
-  target: THREE.WebGLRenderTarget | null = null;
   /** The 4:3 view inside the canvas, in CSS pixels. */
   view: Viewport = { x: 0, y: 0, w: 0, h: 0 };
-  private targets: THREE.WebGLRenderTarget[] = [];
-  private busy = new Set<THREE.WebGLRenderTarget>();
 
   init(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
@@ -70,16 +66,13 @@ export class Display {
     let vh = Math.round(w * ORTHO_H / ORTHO_W);
     if (vh > h) { vh = h; vw = Math.round(h * ORTHO_W / ORTHO_H); }
     this.view = { x: Math.floor((w - vw) / 2), y: Math.floor((h - vh) / 2), w: vw, h: vh };
-    const pr = this.renderer.getPixelRatio();
-    for (const t of this.targets) t.setSize(Math.round(vw * pr), Math.round(vh * pr));
   }
 
-  /** Width in ortho units of a line that was `px` pixels wide at 640x480. */
+  /** Width in ortho units of a line `px` pixels wide at 640x480. */
   px(px: number): number { return px * ORTHO_W / BASE_W; }
 
   beginFrame(): void {
     const r = this.renderer;
-    this.target = null;
     r.setRenderTarget(null);
     r.setScissorTest(false);
     r.setClearColor(0x000000, 1);
@@ -108,38 +101,6 @@ export class Display {
 
   render3d(scene: THREE.Object3D, camera: THREE.Camera): void {
     this.renderer.render(scene, camera);
-  }
-
-  /** An offscreen target the size of the view (reused, owned by Display). */
-  acquireTarget(): THREE.WebGLRenderTarget {
-    const free = this.targets.find((t) => !this.busy.has(t));
-    if (free) { this.busy.add(free); return free; }
-    const pr = this.renderer.getPixelRatio();
-    const t = new THREE.WebGLRenderTarget(Math.round(this.view.w * pr), Math.round(this.view.h * pr), {
-      depthBuffer: true,
-      samples: 4,
-    });
-    this.busy.add(t);
-    this.targets.push(t);
-    return t;
-  }
-
-  releaseTarget(t: THREE.WebGLRenderTarget): void { this.busy.delete(t); }
-
-  /** Run fn() with drawing redirected into render target `t`. */
-  withTarget(t: THREE.WebGLRenderTarget, fn: () => void): void {
-    const r = this.renderer;
-    const prev = this.target;
-    this.target = t;
-    r.setRenderTarget(t);
-    r.setClearColor(0x000000, 1);
-    r.clear(true, true, true);
-    try {
-      fn();
-    } finally {
-      this.target = prev;
-      r.setRenderTarget(prev);
-    }
   }
 }
 

@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 
-export const FILM_SATURATION = 0.4; // 0 = black and white, 1 = full colour
+const FILM_SATURATION = 0.4; // 0 = black and white, 1 = full colour
 const CONTRAST = 1.08;
 const TINT = [1.015, 1.0, 0.965]; // a faint warm (silver gelatin) tone
 const LUMA = [0.299, 0.587, 0.114];

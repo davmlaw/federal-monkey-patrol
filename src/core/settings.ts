@@ -3,7 +3,7 @@
 
 import { readLines } from './assets.ts';
 
-const MODULES = ['display', 'story', 'physics', 'game', 'main', 'tuner', 'city', 'kong', 'blonde'];
+const MODULES = ['story', 'game', 'main', 'kong', 'blonde'];
 
 export type Properties = Map<string, string>;
 
@@ -46,8 +46,6 @@ class Settings {
     console.log(`Settings(${module}, ${key}) = '${value}'`);
     this.module(module).set(key, String(value));
   }
-
-  keys(): string[] { return [...this.modules.keys()].sort(); }
 }
 
 export const settings = new Settings();

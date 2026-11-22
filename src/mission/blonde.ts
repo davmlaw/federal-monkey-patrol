@@ -234,7 +234,7 @@ export class Blonde extends Entity {
   private hops = 0;
 
   constructor(
-    private pose: THREE.Group, // turned to face -Z (as the kongs do)
+    pose: THREE.Group, // turned to face -Z (as the kongs do)
     private mesh: THREE.Object3D,
     private anim: RigAnimator<BlondeClip>,
     private kit: BlondeKit,

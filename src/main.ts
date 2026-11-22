@@ -2,7 +2,7 @@
 // and the input manager, and the loop: read input, play the game, until it
 // quits.
 //
-// Pick the .game file with ?game=<path> (e.g. ?game=fly.game); the default
+// Pick the .game file with ?game=<path> (e.g. ?game=freeplay.game); the default
 // is main.properties' default_game, data/federal_monkey_patrol.game.
 
 import './style.css';
@@ -13,7 +13,6 @@ import { Button, Input, InputManager, PointerTap } from './core/input.ts';
 import { settings } from './core/settings.ts';
 import { Status } from './game/component.ts';
 import { GameManager } from './game/manager.ts';
-import { stopMusic } from './game/simple.ts';
 import { gamestats } from './mission/stats.ts';
 import { TouchControls } from './core/touch.ts';
 import { lastResult, Mission } from './mission/mission.ts';
@@ -68,7 +67,6 @@ skipLink.addEventListener('click', (e) => {
 function gameUrl(file: string, mission = 0): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
-  u.searchParams.delete('flow');
   if (mission) u.searchParams.set('mission', String(mission));
   else u.searchParams.delete('mission');
   return u.pathname + u.search;
@@ -237,7 +235,6 @@ function stop(): void {
   paused = false;
   hud.hidden = true;
   stage.clear();
-  stopMusic();
   game?.dispose();
   game = null;
   inputmanager?.dispose();

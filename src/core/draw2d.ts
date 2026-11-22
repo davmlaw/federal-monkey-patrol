@@ -1,6 +1,6 @@
 // 2D drawing: an immediate-mode batcher for the ortho 2D space, plus a
 // small scene graph on top of it (Drawable2D, Quad, Image, Container2D,
-// Text2D in the bitmap font, WordList2D).
+// Text2D in the bitmap font).
 
 import * as THREE from 'three';
 import { loadTexture } from './assets.ts';
@@ -12,12 +12,10 @@ const VERT = /* glsl */`
 attribute vec4 rgba;
 varying vec2 vUv;
 varying vec4 vColor;
-varying vec2 vScreen;
 void main() {
   vUv = uv;
   vColor = rgba;
   gl_Position = vec4(position.x * ${(2 / ORTHO_W).toFixed(6)}, position.y * ${(2 / ORTHO_H).toFixed(6)}, 0.0, 1.0);
-  vScreen = gl_Position.xy * 0.5 + 0.5;
 }`;
 
 const FRAG = /* glsl */`
@@ -25,18 +23,15 @@ uniform sampler2D map;
 uniform int mode;
 varying vec2 vUv;
 varying vec4 vColor;
-varying vec2 vScreen;
 void main() {
   vec4 c = vColor;
   if (mode == 1) c *= texture2D(map, vUv);
-  else if (mode == 2) c = vec4(texture2D(map, vScreen).rgb, 1.0);
   gl_FragColor = c;
 }`;
 
 const MODE_COLOR = 0;
 const MODE_TEXTURE = 1;
-const MODE_SCREEN = 2;
-type Mode = typeof MODE_COLOR | typeof MODE_TEXTURE | typeof MODE_SCREEN;
+type Mode = typeof MODE_COLOR | typeof MODE_TEXTURE;
 
 /** [r, g, b, a], 0..1. */
 export type Color = number[];
@@ -170,8 +165,8 @@ export class Batch2D {
   }
 
   /** Triangles from a flat list of [x, y, u, v] points (3 per triangle). */
-  triangles(points: Point[], color: Color, tex: THREE.Texture | null = null,
-    mode: Mode = tex ? MODE_TEXTURE : MODE_COLOR): void {
+  triangles(points: Point[], color: Color, tex: THREE.Texture | null = null): void {
+    const mode = tex ? MODE_TEXTURE : MODE_COLOR;
     const b = this.batchFor(mode, tex, points.length);
     for (const p of points) this.vertex(p[0], p[1], p[2] || 0, p[3] || 0, color);
     b.count += points.length;
@@ -190,9 +185,8 @@ export class Batch2D {
   }
 
   /** Axis-aligned rectangle by corners (no texture). */
-  rect(x0: number, y0: number, x1: number, y1: number, color: Color,
-    tex: THREE.Texture | null = null, mode?: Mode): void {
-    this.triangles([[x0, y1], [x0, y0], [x1, y0], [x0, y1], [x1, y0], [x1, y1]], color, tex, mode);
+  rect(x0: number, y0: number, x1: number, y1: number, color: Color): void {
+    this.triangles([[x0, y1], [x0, y0], [x1, y0], [x0, y1], [x1, y0], [x1, y1]], color);
   }
 
   /** A thick line strip (a loop if `closed`). */
@@ -218,11 +212,6 @@ export class Batch2D {
       tris.push(a, b, c, a, c, d);
     }
     if (tris.length) this.triangles(tris, color);
-  }
-
-  /** Triangles that show `rtTexture` (a full-view render) where they cover. */
-  screenTriangles(points: Point[], rtTexture: THREE.Texture): void {
-    this.triangles(points, [1, 1, 1, 1], rtTexture, MODE_SCREEN);
   }
 
   flush(): void {
@@ -347,7 +336,7 @@ export class Image extends Quad {
 export const LEFT = 1;
 export const RIGHT = 2;
 export const TOP = 4;
-export const BOTTOM = 8;
+const BOTTOM = 8;
 
 export class Container2D extends Drawable2D {
   children: Drawable2D[] = [];
@@ -476,46 +465,5 @@ export class Text2D extends Drawable2D {
     g.setBlend('premult');
     g.triangles(tris, color, fontTexture);
     g.setBlend(prev);
-  }
-}
-
-// =================================================================== WordList2D
-
-const WORDLIST_FONT = 0.2;
-const LINE_SPACING = 0.005;
-
-/** Word-wrapped text. words[0] is the speaker ("Harlow:") and is skipped. */
-export class WordList2D extends Drawable2D {
-  lines: Text2D[] = [];
-  wordCount = 0;
-
-  constructor(w: number, h: number, words: string[]) {
-    super(w, h);
-    const spaceLength = textWidth(' ') * WORDLIST_FONT;
-    let lineLength = 0;
-    let line = '';
-    for (let i = 1; i < words.length; i++, this.wordCount++) {
-      const wordLength = textWidth(words[i]) * WORDLIST_FONT;
-      if (lineLength + wordLength > this.getWidth()) {
-        this.lines.push(new Text2D(line, WORDLIST_FONT));
-        lineLength = 0;
-        line = '';
-      }
-      line += ` ${words[i]}`;
-      lineLength += spaceLength + wordLength;
-    }
-    if (lineLength) this.lines.push(new Text2D(line, WORDLIST_FONT));
-    // align the text
-    const topleft = { x: -this.getWidth() / 2, y: this.getHeight() / 2 };
-    for (const t of this.lines) {
-      t.position = { x: topleft.x + t.getWidth() / 2, y: topleft.y };
-      topleft.y -= t.getHeight() + LINE_SPACING;
-    }
-  }
-
-  getWordCount(): number { return this.wordCount; }
-
-  protected override representation(g: Batch2D, alpha: number): void {
-    for (const t of this.lines) t.draw(g, alpha);
   }
 }

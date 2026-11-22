@@ -1,6 +1,6 @@
 // The HTML stage: pictures, blanks and story
 // scenes are DOM layers over the 4:3 view instead of WebGL quads, so text
-// is real text and transitions are CSS (opacity, clip-path, masks). Missions
+// is real text and transitions are CSS (opacity, clip-path). Missions
 // still draw with WebGL on the canvas underneath.
 //
 // Immediate-mode, like the rest of the drawing: each frame, a component
@@ -12,10 +12,9 @@
 import { display, type Viewport } from '../core/display.ts';
 
 /** A look applied to the layers shown inside Stage.withEffect(). */
-export interface Effect {
+interface Effect {
   opacity?: number;
   clipPath?: string;
-  mask?: string;
 }
 
 /** [x, y], in ortho units or percent of the stage. */
@@ -58,11 +57,10 @@ class Stage {
     const opacity = alpha * (fx.opacity ?? 1);
     s.opacity = opacity < 1 ? String(opacity) : '';
     s.clipPath = fx.clipPath ?? '';
-    s.webkitMaskImage = s.maskImage = fx.mask ?? '';
   }
 
   /** Run f() with layers it shows clipped/faded by `fx`
-   *  ({ opacity, clipPath, mask }). */
+   *  ({ opacity, clipPath }). */
   withEffect(fx: Effect, f: () => void): void {
     this.effects.push(fx);
     try {
@@ -92,7 +90,7 @@ export function makeLayer(className: string, html = ''): HTMLDivElement {
   return el;
 }
 
-// ------------------------------------------------- masks for transitions
+// ---------------------------------------------- clipping for transitions
 
 /** Ortho coordinates (centred, y up, 1 x 0.75) to percent of the stage. */
 export function toPercent([x, y]: Point2, w: number, h: number): [number, number] {
@@ -104,20 +102,4 @@ const f = (n: number): string => n.toFixed(2);
 /** clip-path showing only inside the polygon (points in percent). */
 export function clipInside(pts: Point2[]): string {
   return `polygon(${pts.map(([x, y]) => `${f(x)}% ${f(y)}%`).join(',')})`;
-}
-
-/** mask-image showing everything except inside the polygon. */
-export function maskOutside(pts: Point2[]): string {
-  const hole = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${f(x)} ${f(y)}`).join(' ');
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'>`
-    + `<path fill-rule='evenodd' d='M-50 -50H150V150H-50Z ${hole}Z'/></svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-}
-
-/** An SVG overlay layer with a closed outline (e.g. the star wipe's edge). */
-export function outlineLayer(layer: HTMLElement, pts: Point2[], width: number): HTMLElement {
-  const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${f(x)} ${f(y)}`).join(' ');
-  layer.innerHTML = `<svg viewBox='0 0 100 100' preserveAspectRatio='none' width='100%' height='100%'>`
-    + `<path d='${d}Z' fill='none' stroke='white' stroke-width='${width}' vector-effect='non-scaling-stroke' stroke-linejoin='round'/></svg>`;
-  return layer;
 }

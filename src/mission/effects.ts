@@ -1,5 +1,5 @@
-// Particle effects: sparks where bullets hit, explosions for crashes and
-// bombs. Each layer is one THREE.Points with its own size and colour per
+// Particle effects: sparks where bullets hit, fur and dust, and explosions
+// for crashes. Each layer is one THREE.Points with its own size and colour per
 // particle, updated on the CPU (there are only ever a few hundred).
 
 import * as THREE from 'three';
@@ -20,7 +20,7 @@ interface Particle {
   bounce: boolean; // off the street, losing most of its speed
 }
 
-export type ParticleSpec = Omit<Particle, 'age'>;
+type ParticleSpec = Omit<Particle, 'age'>;
 
 /** A soft round blob, white, alpha falling off from the centre. */
 function blobTexture(hardness: number): THREE.Texture {
@@ -174,8 +174,6 @@ class ParticleLayer {
     this.points.geometry.setDrawRange(0, n);
   }
 
-  clear(): void { this.particles = []; }
-
   dispose(): void {
     this.points.geometry.dispose();
     (this.points.material as THREE.Material).dispose();
@@ -213,9 +211,8 @@ export class Effects {
 
   constructor() {
     const hard = blobTexture(0.25);
-    const soft = blobTexture(0.05);
     const puff = puffTexture();
-    this.textures = [hard, soft, puff];
+    this.textures = [hard, puff];
     this.smoke = new ParticleLayer(1500, puff, false);
     this.fire = new ParticleLayer(1000, puff, true);
     this.glow = new ParticleLayer(3000, hard, true);

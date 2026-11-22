@@ -1,4 +1,5 @@
-// Mission outcomes (Scenario -> Condition -> Result) and Constraints.
+// Mission outcomes (Scenario -> Condition -> Result), and the plane's
+// speed range.
 //
 // <scenario>
 //   <condition> <AND|OR|NOT|stat name="..." op="gte" value="5" /> </condition>
@@ -15,10 +16,7 @@ import { settings } from '../core/settings.ts';
  *  message, then takes the status. */
 export interface StatusTarget { finish(s: Status, message: string): void }
 
-/** The player, as far as Constraints needs it. */
-export interface Constrained { entity: { object: { position: { y: number } } } }
-
-export interface Condition { isTrue(): boolean }
+interface Condition { isTrue(): boolean }
 
 /** Child elements by lower-case name (last one wins). */
 export function xmlMap(node: Element | null | undefined): Partial<Record<string, Element>> {
@@ -45,7 +43,7 @@ function evalOp(a: number, op: string, b: number): boolean {
 }
 
 /** Builds a condition from XML. Returns null if it can't. */
-export function buildCondition(node: Element | null): Condition | null {
+function buildCondition(node: Element | null): Condition | null {
   if (!node) return null;
   const name = node.nodeName.toLowerCase();
   if (name === 'not') {
@@ -74,21 +72,18 @@ export function buildCondition(node: Element | null): Condition | null {
 /** ChangeStatusResult: sets the mission's status (next/lost/quit/playing). */
 class ChangeStatusResult {
   private toStatus: Status;
-  private done = false;
 
-  constructor(value: string, private message: string, private onceOnly = false) {
+  constructor(value: string, private message: string) {
     this.toStatus = statusFromName(value);
   }
 
   execute(component: StatusTarget): void {
-    if (this.done) return;
     const message = this.message.replace(/\{(\w+)\}/g, (m, name: string) => {
       const s = statFromName(name);
       return s === Stat.NOSUCHSTAT ? m : String(gamestats.get(s));
     });
     console.log(`ChangeGameStatus->execute() status = ${statusName(this.toStatus)} (${message})`);
     component.finish(this.toStatus, message);
-    if (this.onceOnly) this.done = true;
   }
 }
 
@@ -128,7 +123,7 @@ export class Outcomes {
  *  to *_high at speed_high_height and above, in proportion in between.
  *  Low down it can creep along the streets; high up, where the city
  *  below scrolls past slowly, it goes faster. */
-function altitudeSpeeds(height: number): { min: number; max: number } {
+export function altitudeSpeeds(height: number): { min: number; max: number } {
   const g = (k: string, d: number): number => {
     const v = settings.getf('game', k);
     return Number.isFinite(v) ? v : d;
@@ -139,32 +134,4 @@ function altitudeSpeeds(height: number): { min: number; max: number } {
   const at = (k: string, low: number, high: number): number => g(`${k}_low`, low) + t * (g(`${k}_high`, high) - g(`${k}_low`, low));
   const min = at('min_speed', 80, 600);
   return { min, max: Math.max(min, at('max_speed', 600, 1500)) };
-}
-
-/**
- * Limits on the player: the height is enforced here; speeds() is what the
- * throttle maps to (the plane never flies slower than its min).
- *
- * Note: the mission builder looks for <max_height>, <min_height>,
- * <max_speed> and <min_speed>, but the mission XML files say <maxheight>
- * etc., so in practice the defaults apply (see mission.ts).
- */
-export class Constraints {
-  maxHeight = 10000;
-  minHeight = 0;
-  /** Fixed speeds from the mission; unset, they go by altitude. */
-  maxSpeed: number | null = null;
-  minSpeed: number | null = null;
-
-  /** The speed range at `height`. */
-  speeds(height: number): { min: number; max: number } {
-    const s = altitudeSpeeds(height);
-    const min = this.minSpeed ?? s.min;
-    return { min, max: Math.max(min, this.maxSpeed ?? s.max) };
-  }
-
-  restrict(player: Constrained): void {
-    const p = player.entity.object.position;
-    p.y = Math.min(this.maxHeight, Math.max(this.minHeight, p.y));
-  }
 }

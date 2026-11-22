@@ -8,10 +8,10 @@ import { fetchText, playBang } from '../core/assets.ts';
 import { dircheck, settings } from '../core/settings.ts';
 import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from '../game/component.ts';
-import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
+import { altitudeSpeeds, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { Banner, blondeFinderIcon, ClawAlert, CountDownTimer, Finder, FINDER_RED, FogPlane, IconTally, KissPop, kongFinderIcon, LivesDisplay, LoadBar, Radar, TurnBack, type FinderTarget } from './hud.ts';
+import { Banner, blondeFinderIcon, CountDownTimer, Finder, FINDER_RED, FogPlane, IconTally, KissPop, kongFinderIcon, LivesDisplay, LoadBar, Radar, TurnBack, type FinderTarget } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 import { Finale } from './finale.ts';
@@ -42,6 +42,8 @@ const ROAM_AHEAD = 0.4;
 // With a patrol area, the plane starts near its edge, heading for the
 // middle: the middle is this far (in radii) ahead of the start.
 const START_AHEAD = 0.85;
+// The plane's ceiling.
+const MAX_HEIGHT = 10000;
 // When an outcome ends the mission, its message shows this long first.
 const ENDING_MSECS = 4500;
 // A blonde caught or landed: this long the message shows.
@@ -69,24 +71,6 @@ function summary(): string {
   return `${n} kong${n === 1 ? '' : 's'} downed${blondes} in ${minutes(gamestats.get(Stat.GAME_SECONDS))}`;
 }
 
-/** The Giant Claw. Built from <claw>, but nothing calls update() yet, so
- *  its anger never changes. */
-class GiantClaw {
-  private anger = 0;
-  inc = 0;
-  dec = 0;
-  heightFactor = 1;
-
-  constructor(private minVisibleHeight: number) {}
-
-  update(playerPos: { y: number }, msecs: number): void {
-    const change = playerPos.y > this.minVisibleHeight ? this.inc : -this.dec;
-    this.anger = Math.min(1, Math.max(0, this.anger + change * msecs / 1000));
-  }
-
-  getState(): number { return this.anger; }
-}
-
 function parseXML(text: string, filename: string): Element {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   const err = doc.querySelector('parsererror');
@@ -95,11 +79,8 @@ function parseXML(text: string, filename: string): Element {
 }
 
 export class Mission extends GameComponent {
-  private claw: GiantClaw | null = null;
-  private constraints: Constraints | null = null;
   private outcomes: Outcomes | null = null;
   private countdowntimer: CountDownTimer | null = null;
-  private clawalert: ClawAlert | null = null;
   /** City generation progress, 0..1, shown by the load bar. */
   private progress = 0;
   private loadbar: LoadBar | null = null;
@@ -184,10 +165,6 @@ export class Mission extends GameComponent {
 
     this.fogplane = new FogPlane();
     this.hud = new Container2D(ORTHO_W, ORTHO_H);
-    if (this.claw) {
-      this.clawalert = await ClawAlert.create(0.15, 0.35);
-      this.hud.add(this.clawalert, RIGHT);
-    }
     if (this.countdowntimer) this.hud.add(this.countdowntimer, TOP | RIGHT);
     const pos = this.player.entity.object.position;
     const radius = this.roaming ? this.roamRadius ?? (settings.getf('game', 'roam_radius') || 2500) : this.patrolRadius;
@@ -250,13 +227,6 @@ export class Mission extends GameComponent {
     const sc = xmlMap(node.startconditions);
     const startHeight = parseFloat(sc.height?.textContent ?? '') || 0;
     const model = xmlStringMap(sc.model);
-    if (sc.claw) {
-      const c = xmlStringMap(sc.claw);
-      this.claw = new GiantClaw(parseFloat(c.targetheight ?? '') || 0);
-      if (c.inc) this.claw.inc = parseFloat(c.inc) / 100; // percent
-      if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
-      if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
-    }
     // <kongs respawn_msecs="N" health_min="N" health_max="N" height="N" climb_chance="N"
     // on="rooftops" tower_min="N">count</kongs>,
     // with respawn_msecs="never" for a fixed number to clear, and
@@ -320,18 +290,6 @@ export class Mission extends GameComponent {
       this.countdowntimer = new CountDownTimer(parseInt(cd.seconds ?? '', 10) || 0, cd.label ?? '');
     }
 
-    // <constraints>: none of the XML files use these keys (they say
-    // <maxheight> etc.), so in practice the defaults apply. Left as it is
-    // until the missions are revisited.
-    if (node.constraints) {
-      const c = xmlStringMap(node.constraints);
-      this.constraints = new Constraints();
-      if (c.max_height) this.constraints.maxHeight = parseFloat(c.max_height);
-      if (c.min_height) this.constraints.minHeight = parseFloat(c.min_height);
-      if (c.max_speed) this.constraints.maxSpeed = parseFloat(c.max_speed);
-      if (c.min_speed) this.constraints.minSpeed = parseFloat(c.min_speed);
-    }
-
     // <outcomes>
     if (node.outcomes) this.outcomes = new Outcomes(node.outcomes);
   }
@@ -370,7 +328,7 @@ export class Mission extends GameComponent {
       // clear of the roofs, and of kongs standing on them
       const safe = world.grid.maxHeightNear(pos.x, pos.z) + TOPDOWN_CLEARANCE + (this.kongs?.rooftops ? this.kongs.height : 0);
       const topdown = this.flyMode === FlyMode.TOPDOWN;
-      const { min, max } = topdown ? topdownSpeeds() : (this.constraints ?? new Constraints()).speeds(pos.y);
+      const { min, max } = topdown ? topdownSpeeds() : altitudeSpeeds(pos.y);
       // (top-down missions have no throttle: they cruise halfway)
       const throttle = topdown ? 0.5 : input.throttle;
       this.player.read(input, min + throttle * (max - min), min, safe);
@@ -383,7 +341,7 @@ export class Mission extends GameComponent {
       this.patrol.z = o.position.z + fwd.z * this.patrol.r * ROAM_AHEAD;
     }
     const wasCrashed = plane.crashed;
-    if (!wasCrashed) this.constraints?.restrict(this.player);
+    if (!wasCrashed) plane.object.position.y = Math.min(MAX_HEIGHT, Math.max(0, plane.object.position.y));
     this.kongs?.update(world, msecs, plane.object);
     if (this.kongs && !this.finale) this.bananas?.update(world, msecs, this.kongs.living(), plane);
     world.update(msecs);
