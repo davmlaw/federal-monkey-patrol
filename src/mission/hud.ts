@@ -1,5 +1,5 @@
 // HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
-// TurnBack, IconTally, KissPop, Banner, the FPS readout, and the "generating
+// TurnBack, KongPointer, IconTally, KissPop, Banner, the FPS readout, and the "generating
 // skyscrapers" LoadBar.
 
 import * as THREE from 'three';
@@ -281,6 +281,50 @@ export class TurnBack extends Drawable2D {
     this.line.setWidth(textWidth(this.line.text) * this.line.font);
     this.line.position.y = -0.04;
     this.line.draw(g, alpha);
+  }
+}
+
+/**
+ * An arrow pointing to the nearest kong when one is close (missions with a
+ * fixed number to find): it points the way the kong lies on the screen
+ * (up for one high on a building ahead), and says BEHIND when it's behind
+ * the camera.
+ */
+export class KongPointer extends Drawable2D {
+  /** Screen direction to point (ortho units, y up), or null: hidden. */
+  dir: { x: number; y: number } | null = null;
+  behind = false;
+  private label = new Text2D('BEHIND', 0.14);
+  private clock = 0;
+
+  constructor(size: number) {
+    super(size, size);
+    this.label.setColor(1, 0.85, 0.3);
+  }
+
+  update(msecs: number): void { this.clock += msecs; }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    if (!this.dir) return;
+    const len = Math.hypot(this.dir.x, this.dir.y);
+    if (len < 1e-6) return;
+    const ux = this.dir.x / len;
+    const uy = this.dir.y / len;
+    // a gentle pulse along the way it points
+    const r = this.getWidth() / 2;
+    const nudge = Math.sin(this.clock / 130) * r * 0.12;
+    const at = (a: number, s: number): Point => [ux * (a + nudge) - uy * s, uy * (a + nudge) + ux * s];
+    const head = [at(r, 0), at(r * 0.1, -r * 0.6), at(r * 0.1, r * 0.6)];
+    const shaft = [at(r * 0.15, -r * 0.22), at(-r * 0.8, -r * 0.22), at(-r * 0.8, r * 0.22), at(r * 0.15, r * 0.22)];
+    const fill: Color = [1, 0.4, 0.25, 0.9 * alpha];
+    g.triangles([...head, shaft[0], shaft[1], shaft[2], shaft[0], shaft[2], shaft[3]], fill);
+    const ink: Color = [0.1, 0.05, 0.03, 0.8 * alpha];
+    g.polyline([head[0], head[1], shaft[0], shaft[1], shaft[2], shaft[3], head[2]], 0.003, ink, true);
+    if (this.behind) {
+      this.label.setWidth(textWidth(this.label.text) * this.label.font);
+      this.label.position = { x: 0, y: -r * 1.45 };
+      this.label.draw(g, alpha);
+    }
   }
 }
 

@@ -11,7 +11,7 @@ import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, IconTally, KissPop, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
+import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, IconTally, KissPop, KongPointer, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 import { Finale } from './finale.ts';
@@ -31,6 +31,9 @@ const WRECK_MSECS = 1500; // the last crash burns this long, then the game-over 
 // The radar reaches this far (world units); kongs further off sit on its rim.
 const RADAR_RANGE = 2400;
 const RADAR_SIZE = 0.2;
+// With a fixed number of kongs to find, an arrow under the tally points to
+// the nearest when it's within game.properties' pointer_range.
+const POINTER_SIZE = 0.05;
 // After losing a plane for flying out of bounds: this long a message shows.
 const OUT_MESSAGE_MSECS = 3000;
 // With no patrol area, the kongs' area is centred this far (in radii) ahead
@@ -142,6 +145,9 @@ export class Mission extends GameComponent {
   private roamRadius: number | null = null;
   /** Kongs downed (or left), as a kong's head and "x3". */
   private tally!: IconTally;
+  /** Only with a fixed number of kongs (no respawns). */
+  private pointer: KongPointer | null = null;
+  private pointerRange = 1200;
   /** Blondes caught, under the kongs (when there are blondes). */
   private blondeTally: IconTally | null = null;
   /** An outcome has ended the mission: the status to take when the banner
@@ -219,6 +225,13 @@ export class Mission extends GameComponent {
       this.hud.add(this.blondeTally, TOP);
       this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.005;
       this.blondeTally.setColor(1, 0.95, 0.7);
+    }
+    if (!this.kongs.respawns) {
+      this.pointerRange = settings.getf('game', 'pointer_range') || 1200;
+      this.pointer = new KongPointer(POINTER_SIZE);
+      this.hud.add(this.pointer, TOP);
+      const above = this.blondeTally ?? this.tally;
+      this.pointer.position.y = above.position.y - above.getHeight() / 2 - POINTER_SIZE * 0.9;
     }
     this.blondeMessage.position.y = 0.2;
     gamestats.reset();
@@ -479,6 +492,7 @@ export class Mission extends GameComponent {
     this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs, this.player.screenOffset());
     this.world!.draw(display, this.cameraman.getCamera());
     this.updateRadar(msecs);
+    this.updatePointer(msecs);
     display.draw2d(this.hud);
     if (this.outside > 0 && !this.heading && !this.player.entity.crashed) {
       this.turnBack.update(msecs);
@@ -505,6 +519,45 @@ export class Mission extends GameComponent {
     ];
     this.radar.warn = this.outside > 0 && !this.heading;
     this.radar.update(msecs);
+  }
+
+  /** Points the arrow at the nearest kong, if one is within pointerRange
+   *  (of the plane) and not already falling. */
+  private updatePointer(msecs: number): void {
+    if (!this.pointer || !this.kongs) return;
+    this.pointer.update(msecs);
+    this.pointer.dir = null;
+    const plane = this.player.entity;
+    if (plane.crashed || this.ending) return;
+    const p = plane.object.position;
+    let best: THREE.Vector3 | null = null;
+    let bestD = this.pointerRange;
+    for (const k of this.kongs.living()) {
+      const d = k.object.position.distanceTo(p);
+      if (d < bestD) { bestD = d; best = k.object.position; }
+    }
+    if (!best) return;
+    // its middle, in camera space (as the world was just drawn)
+    const camera = this.world!.camera;
+    camera.updateMatrixWorld();
+    const v = best.clone().setY(best.y + this.kongs.height / 2).applyMatrix4(camera.matrixWorldInverse);
+    this.pointer.behind = v.z > 0;
+    let x: number;
+    let y: number;
+    if (v.z < 0) {
+      // in front: where it is on the screen (ortho units, centred)
+      const ndc = v.applyMatrix4(camera.projectionMatrix);
+      x = ndc.x * ORTHO_W / 2;
+      y = ndc.y * ORTHO_H / 2;
+    } else {
+      // behind: which side it's off to (straight behind: down, as if past the plane)
+      x = v.x;
+      y = Math.abs(v.x) + Math.abs(v.y) < 1e-3 ? -1 : v.y;
+      const n = Math.hypot(x, y);
+      x = x / n * ORTHO_W;
+      y = y / n * ORTHO_W;
+    }
+    this.pointer.dir = { x: x - this.pointer.position.x, y: y - this.pointer.position.y };
   }
 
   override dispose(): void {

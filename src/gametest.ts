@@ -7,7 +7,7 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover, bananas
+//                     blonde, icons, kongfall, gameover, bananas, pointer
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -42,6 +42,9 @@ interface MissionInternals {
   lives: number;
   crashTimer: number;
   finale: { msecs: number; camera: { position: THREE.Vector3 }; kong: Kong } | null;
+  pointer: { dir: { x: number; y: number } | null; behind: boolean } | null;
+  pointerRange: number;
+  player: { turnTo(yaw: number, invulnerable: number): void };
 }
 interface KongInternals {
   tasks: { kind: string; roar?: boolean }[];
@@ -166,6 +169,43 @@ const SCENARIOS: Record<string, Scenario> = {
     h.log(`${b.thrown} thrown, at most ${most} in the air at once; ${gamestats.get(Stat.PLAYER_DEATHS)} planes lost`);
     h.check(most > 0, 'the kongs throw bananas');
     h.check(gamestats.get(Stat.PLAYER_DEATHS) > 0, 'a banana brings the plane down when it flies straight on');
+  },
+
+  /** The arrow to the nearest kong (use mission=killmonkeys.xml or
+   *  clear.xml: a fixed number). Waits for a kong to climb (climbs made
+   *  certain), then puts the plane `dist` (default 700) from it, facing
+   *  it, with it to the left, and with it behind, a frame each; then far
+   *  off, where the arrow should go. */
+  pointer(h) {
+    if (!h.internals.pointer) throw new Error('no pointer in this mission (try mission=killmonkeys.xml)');
+    for (const k of h.kongs()) h.kong(k).cfg.climbChance = 1;
+    h.plane.charmed = true;
+    const park = (): void => { h.plane.object.position.set(h.internals.patrol.x, 2500, h.internals.patrol.z); };
+    const high = (): Kong | undefined => h.kongs().find((k) => k.object.position.y > 120);
+    h.run(120000, { each: park, until: () => !!high() });
+    const kong = high() ?? h.kongs()[0];
+    h.check(!!kong, 'there is a kong');
+    if (!kong) return;
+    h.log(`kong at y=${kong.object.position.y.toFixed(0)}`);
+    const dist = num('dist', 700);
+    const place = (label: string, turn: number, away = dist): void => {
+      const k = kong.object.position;
+      const a = h.t * 0.001; // some direction
+      const p = new THREE.Vector3(k.x + Math.sin(a) * away, Math.max(150, k.y - 60), k.z + Math.cos(a) * away);
+      h.plane.object.position.copy(p);
+      h.internals.player.turnTo(Math.atan2(-(k.x - p.x), -(k.z - p.z)) + turn, 0);
+      h.frame(label, 20, 30);
+      const ptr = h.internals.pointer!;
+      h.log(`${label}: ${ptr.dir ? `points ${ptr.dir.x.toFixed(2)},${ptr.dir.y.toFixed(2)}${ptr.behind ? ' (behind)' : ''}` : 'hidden'}`);
+    };
+    place('facing it', 0);
+    h.check(!!h.internals.pointer!.dir && !h.internals.pointer!.behind, 'the arrow shows, the kong ahead');
+    place('it to the left', -Math.PI / 2);
+    h.check((h.internals.pointer!.dir?.x ?? 0) < 0, 'it points left');
+    place('it behind', Math.PI);
+    h.check(!!h.internals.pointer!.behind, 'it says behind');
+    place('far off', 0, h.internals.pointerRange + 1500);
+    h.check(!h.internals.pointer!.dir, 'no arrow when it is far off');
   },
 
   /** Fly straight on for `secs`, a full frame (with the HUD) each second. */
