@@ -273,61 +273,18 @@ export class TurnBack extends Drawable2D {
   }
 }
 
-/**
- * An arrow pointing to the nearest kong when one is close (missions with a
- * fixed number to find): it points the way the kong lies on the screen
- * (up for one high on a building ahead), and says BEHIND when it's behind
- * the camera.
- */
-export class KongPointer extends Drawable2D {
-  /** Screen direction to point (ortho units, y up), or null: hidden. */
-  dir: { x: number; y: number } | null = null;
-  behind = false;
-  private label = new Text2D('BEHIND', 0.14);
-  private clock = 0;
-
-  constructor(size: number) {
-    super(size, size);
-    this.label.setColor(1, 0.85, 0.3);
-  }
-
-  update(msecs: number): void { this.clock += msecs; }
-
-  protected override representation(g: Batch2D, alpha: number): void {
-    if (!this.dir) return;
-    const len = Math.hypot(this.dir.x, this.dir.y);
-    if (len < 1e-6) return;
-    const ux = this.dir.x / len;
-    const uy = this.dir.y / len;
-    // a gentle pulse along the way it points
-    const r = this.getWidth() / 2;
-    const nudge = Math.sin(this.clock / 130) * r * 0.12;
-    const at = (a: number, s: number): Point => [ux * (a + nudge) - uy * s, uy * (a + nudge) + ux * s];
-    const head = [at(r, 0), at(r * 0.1, -r * 0.6), at(r * 0.1, r * 0.6)];
-    const shaft = [at(r * 0.15, -r * 0.22), at(-r * 0.8, -r * 0.22), at(-r * 0.8, r * 0.22), at(r * 0.15, r * 0.22)];
-    const fill: Color = [1, 0.4, 0.25, 0.9 * alpha];
-    g.triangles([...head, shaft[0], shaft[1], shaft[2], shaft[0], shaft[2], shaft[3]], fill);
-    const ink: Color = [0.1, 0.05, 0.03, 0.8 * alpha];
-    g.polyline([head[0], head[1], shaft[0], shaft[1], shaft[2], shaft[3], head[2]], 0.003, ink, true);
-    if (this.behind) {
-      this.label.setWidth(textWidth(this.label.text) * this.label.font);
-      this.label.position = { x: 0, y: -r * 1.45 };
-      this.label.draw(g, alpha);
-    }
-  }
-}
-
-/** A falling blonde for BlondeFinder: where she is on the screen (ortho
- *  units, centred), or (`onScreen` false) the way she lies off it. */
+/** Something for a Finder to point out: where it is on the screen (ortho
+ *  units, centred), or (`onScreen` false) the way it lies off it. */
 export interface FinderTarget { x: number; y: number; onScreen: boolean }
 
-/** The finder's icon: her head (as on the radar) and a red "!". */
-function finderTexture(): THREE.Texture {
+/** A finder's icon (96 x 64, flipY false): `head` drawn on the left, in
+ *  a 64 x 64 square, and a red "!" on the right. */
+function finderTexture(head: (g: CanvasRenderingContext2D) => void): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = 96;
   c.height = 64;
   const g = c.getContext('2d')!;
-  drawBlondeHead(g, 34, 34, 15);
+  head(g);
   g.font = 'bold 52px Georgia, serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
@@ -342,18 +299,34 @@ function finderTexture(): THREE.Texture {
   return t;
 }
 
+/** The blonde finder's icon: her head (as on the radar) and a red "!". */
+export function blondeFinderIcon(): THREE.Texture {
+  return finderTexture((g) => drawBlondeHead(g, 34, 34, 15));
+}
+
+/** The kong finder's icon: `portrait` (KongTroop.portrait(), a canvas
+ *  texture) and a red "!". */
+export function kongFinderIcon(portrait: THREE.Texture): THREE.Texture {
+  return finderTexture((g) => g.drawImage(portrait.image as CanvasImageSource, 0, 2, 62, 62));
+}
+
+/** Arrow colours for a Finder. */
+export const FINDER_GOLD: Color = [0.95, 0.76, 0.19, 1];
+export const FINDER_RED: Color = [1, 0.4, 0.25, 1];
+
 /**
- * Each falling blonde, always: on screen, her head and "!" over her with a
- * chevron pointing down at her; off it, on the edge of the screen the way
- * she lies, with an arrow pointing out to her. They pulse.
+ * Points things out, always (each falling blonde; each kong in a mission
+ * with a fixed number): on screen, its icon over it with a chevron
+ * pointing down at it; off it, on the edge of the screen the way it lies,
+ * with an arrow pointing out to it. They pulse.
  */
-export class BlondeFinder extends Drawable2D {
+export class Finder extends Drawable2D {
   targets: FinderTarget[] = [];
   private clock = 0;
-  private icon = finderTexture();
 
-  /** `size`: the icon's height. */
-  constructor(private iconSize: number) {
+  /** `iconSize`: the icon's height (it's 1.5 times as wide); `arrow`: the
+   *  off-screen arrow's colour. */
+  constructor(private iconSize: number, private icon: THREE.Texture, private arrow: Color = FINDER_GOLD) {
     super(ORTHO_W, ORTHO_H);
   }
 
@@ -363,7 +336,7 @@ export class BlondeFinder extends Drawable2D {
     const h = this.iconSize * (1 + 0.12 * Math.sin(this.clock / 110));
     const w = h * 1.5;
     const ink: Color = [0.16, 0.11, 0.03, 0.9 * alpha];
-    const gold: Color = [0.95, 0.76, 0.19, alpha];
+    const fill: Color = [this.arrow[0], this.arrow[1], this.arrow[2], this.arrow[3] * alpha];
     for (const t of this.targets) {
       let ix: number;
       let iy: number;
@@ -393,7 +366,7 @@ export class BlondeFinder extends Drawable2D {
         const at = (a: number, sd: number): Point => [ix + ux * (a + nudge) - uy * sd, iy + uy * (a + nudge) + ux * sd];
         const r = this.iconSize;
         const head = [at(r * 1.35, 0), at(r * 0.85, -r * 0.4), at(r * 0.85, r * 0.4)];
-        g.triangles(head, gold);
+        g.triangles(head, fill);
         g.polyline(head, 0.003, ink, true);
       }
       g.push();

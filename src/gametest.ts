@@ -7,7 +7,7 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover, bananas, pointer, win, reach,
+//                     blonde, icons, kongfall, gameover, bananas, pointer (the kong finder), win, reach,
 //                     midway
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
@@ -43,8 +43,7 @@ interface MissionInternals {
   lives: number;
   crashTimer: number;
   finale: { msecs: number; camera: { position: THREE.Vector3 }; kong: Kong } | null;
-  pointer: { dir: { x: number; y: number } | null; behind: boolean } | null;
-  pointerRange: number;
+  kongFinder: { targets: { x: number; y: number; onScreen: boolean }[] } | null;
   finder: { targets: { x: number; y: number; onScreen: boolean }[] } | null;
   player: { turnTo(yaw: number, invulnerable: number): void };
 }
@@ -234,13 +233,13 @@ const SCENARIOS: Record<string, Scenario> = {
     h.check(offscreen === 0, 'no kong is hit off screen');
   },
 
-  /** The arrow to the nearest kong (use mission=killmonkeys.xml or
-   *  clear.xml: a fixed number). Waits for a kong to climb (climbs made
+  /** The kong finder (use mission=killmonkeys.xml or clear.xml: a fixed
+   *  number): its head and "!" over each kong on screen, or on the edge
+   *  of the screen with an arrow. Waits for a kong to climb (climbs made
    *  certain), then puts the plane `dist` (default 700) from it, facing
-   *  it, with it to the left, and with it behind, a frame each; then far
-   *  off, where the arrow should go. */
+   *  it, with it to the left, with it behind and far off, a frame each. */
   pointer(h) {
-    if (!h.internals.pointer) throw new Error('no pointer in this mission (try mission=killmonkeys.xml)');
+    if (!h.internals.kongFinder) throw new Error('no kong finder in this mission (try mission=killmonkeys.xml)');
     for (const k of h.kongs()) h.kong(k).cfg.climbChance = 1;
     h.plane.charmed = true;
     const park = (): void => { h.plane.object.position.set(h.internals.patrol.x, 2500, h.internals.patrol.z); };
@@ -251,6 +250,9 @@ const SCENARIOS: Record<string, Scenario> = {
     if (!kong) return;
     h.log(`kong at y=${kong.object.position.y.toFixed(0)}`);
     const dist = num('dist', 700);
+    // this kong's target (the finder has one per kong standing, in order)
+    const target = (): { x: number; y: number; onScreen: boolean } | undefined =>
+      h.internals.kongFinder!.targets[h.kongs().filter((k) => !k.isDying()).indexOf(kong)];
     const place = (label: string, turn: number, away = dist): void => {
       const k = kong.object.position;
       const a = h.t * 0.001; // some direction
@@ -258,17 +260,17 @@ const SCENARIOS: Record<string, Scenario> = {
       h.plane.object.position.copy(p);
       h.internals.player.turnTo(Math.atan2(-(k.x - p.x), -(k.z - p.z)) + turn, 0);
       h.frame(label, 20, 30);
-      const ptr = h.internals.pointer!;
-      h.log(`${label}: ${ptr.dir ? `points ${ptr.dir.x.toFixed(2)},${ptr.dir.y.toFixed(2)}${ptr.behind ? ' (behind)' : ''}` : 'hidden'}`);
+      const t = target();
+      h.log(`${label}: ${h.internals.kongFinder!.targets.length} targets; this one ${t ? `${t.onScreen ? 'on screen' : 'off it'} at ${t.x.toFixed(2)},${t.y.toFixed(2)}` : 'missing'}`);
     };
     place('facing it', 0);
-    h.check(!!h.internals.pointer!.dir && !h.internals.pointer!.behind, 'the arrow shows, the kong ahead');
+    h.check(!!target()?.onScreen, 'over the kong ahead');
     place('it to the left', -Math.PI / 2);
-    h.check((h.internals.pointer!.dir?.x ?? 0) < 0, 'it points left');
+    h.check(!target()?.onScreen && (target()?.x ?? 0) < 0, 'on the left edge');
     place('it behind', Math.PI);
-    h.check(!!h.internals.pointer!.behind, 'it says behind');
-    place('far off', 0, h.internals.pointerRange + 1500);
-    h.check(!h.internals.pointer!.dir, 'no arrow when it is far off');
+    h.check(!!target() && !target()!.onScreen, 'off screen when it is behind');
+    place('far off, behind', Math.PI, 3000);
+    h.check(!!target() && !target()!.onScreen, 'still pointed out when it is far off');
   },
 
   /** Shoot every kong down at once and show the mission's ending (use a
