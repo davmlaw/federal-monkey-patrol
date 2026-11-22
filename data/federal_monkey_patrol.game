@@ -98,9 +98,9 @@ transition fade 500
 ################################
 ###   MISSION 5: RESCUE      ###
 ################################
-# the chase camera, blondes everywhere: lose one and it's over
+# the chase camera, blondes everywhere, five kongs to down: lose one and it's over
 
-card 2200 Rescue 3 Blondes|Lose None
+card 2200 Rescue 3 Blondes|Kill 5 Kongs|Lose None
 transition fade 600
 mission rescue.xml
 transition fade 1000

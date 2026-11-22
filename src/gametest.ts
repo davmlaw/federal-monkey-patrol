@@ -346,8 +346,10 @@ const SCENARIOS: Record<string, Scenario> = {
     kit.cfg.grabChance = 1;
     for (const k of h.kongs()) h.kong(k).cfg.climbChance = 1;
     h.plane.charmed = true;
-    // keep the plane out of the way, high over the middle
-    const park = (): void => { h.plane.object.position.set(h.internals.patrol.x, 2500, h.internals.patrol.z); };
+    // keep the plane out of the way, high over the middle (where it is at
+    // the start: with no patrol area, the kongs' area moves with the plane)
+    const { x: px, z: pz } = h.internals.patrol;
+    const park = (): void => { h.plane.object.position.set(px, 2500, pz); };
     let kong: Kong | undefined;
     h.run(180000, { each: park, until: () => !!(kong = h.kongs().find((k) => k.blonde)) });
     h.check(!!kong, 'a kong grabbed a blonde');

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
-<!-- The story's last mission: the patrol area, the chase camera, and kongs
-     carrying off blondes all over. Catch three; let one land and it's game
-     over. -->
+<!-- The story's last mission: the chase camera, and kongs carrying off
+     blondes all over, wherever the plane flies (no patrol area or radar).
+     Catch three and down five kongs; let one land and it's game over. -->
 <mission>
 
 <startconditions>
@@ -12,16 +12,21 @@
   </model>
   <kongs respawn_msecs="4000" climb_chance="0.6">6</kongs>
   <blondes grab_chance="1" max="6">on</blondes>
+  <patrolradius>none</patrolradius>
+  <radar>off</radar>
 </startconditions>
 
 <outcomes>
   <scenario>
     <condition>
-      <stat name="blonde_rescues" op="gte" value="3" />
+      <and>
+        <stat name="blonde_rescues" op="gte" value="3" />
+        <stat name="monkey_deaths" op="gte" value="5" />
+      </and>
     </condition>
     <result>
       <value>next</value>
-      <message>Three blondes saved! The city is yours, Harlow.</message>
+      <message>Three blondes saved, five kongs down! The city is yours, Harlow.</message>
     </result>
   </scenario>
   <scenario>
