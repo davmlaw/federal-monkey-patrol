@@ -20,9 +20,8 @@ transition fade 200
 
 # Mission, story, mission, story...: the game starts straight away, and the
 # story (Harlow and the history of the Federal Monkey Patrol) comes in
-# short intermissions between the missions. The "Story" cards stand in for
-# them until they're cut down from the old cutscenes (data/story/, listed
-# in the comments where they might go).
+# short flashback intermissions between the missions
+# (data/story/intermissions/, cut down from the 2006 cutscenes).
 
 ################################
 ###   MISSION 1: 3 KONGS     ###
@@ -35,11 +34,11 @@ mission killmonkeys.xml
 transition fade 1000
 
 ################################
-###   STORY 1                ###
+###   STORY 1: EARLIER...    ###
 ################################
-# 1_intro/02janitors_office1.shot, 1_intro/03janitors_office2.shot
 
-card 2500 Story
+storyteller intermissions/1a_wake_up.shot
+storyteller intermissions/1b_after_breakfast.shot
 transition fade 500
 
 ################################
@@ -53,11 +52,13 @@ mission survive1.xml
 transition fade 1000
 
 ################################
-###   STORY 2                ###
+###   STORY 2: POLICE HQ     ###
 ################################
-# 2_killmonkey/03lab.shot ... 06chief_office2.shot
 
-card 2500 Story
+storyteller intermissions/2a_car.shot
+storyteller intermissions/2b_sign_here.shot
+storyteller intermissions/2c_windows.shot
+storyteller intermissions/2d_get_him_a_plane.shot
 transition fade 500
 
 ################################
@@ -71,11 +72,10 @@ mission saveblondes.xml
 transition fade 1000
 
 ################################
-###   STORY 3                ###
+###   STORY 3: BACK AT BASE  ###
 ################################
-# 3_rescue/all.shot
 
-card 2500 Story
+storyteller intermissions/3_returning.shot
 transition fade 500
 
 ################################
@@ -89,11 +89,11 @@ mission survive2.xml
 transition fade 1000
 
 ################################
-###   STORY 4                ###
+###   STORY 4: THE PARTY     ###
+###   PLANE                  ###
 ################################
-# 4_claw/all.shot (the backstory half)
 
-card 2500 Story
+storyteller intermissions/4_underpants.shot
 transition fade 500
 
 ################################
@@ -109,7 +109,10 @@ transition fade 1000
 ################################
 ###   STORY 5: THE END       ###
 ################################
+# Sent off with the blondes and a crate of whiskey... and down they go
+# again, over the radio.
 
-card 3000 Story
-transition fade 1000
-card 3000 The End
+storyteller intermissions/5a_send_off.shot
+storyteller intermissions/5b_radio.shot
+transition fade 1500
+card 3500 The End

@@ -11,7 +11,7 @@ import type { Display } from '../core/display.ts';
 import { MenuFilter, type Input } from '../core/input.ts';
 import { hexcolor } from '../core/settings.ts';
 import { GameComponent, Status } from './component.ts';
-import { Blank, Picture, SoundTrack, TitleCard } from './simple.ts';
+import { Blank, MissionCard, Picture, SoundTrack, TitleCard } from './simple.ts';
 import { StoryTeller } from './storyteller.ts';
 import { makeTransition, Transition } from './transition.ts';
 import { Mission } from '../mission/mission.ts';
@@ -33,12 +33,14 @@ export class GameManager extends GameComponent {
   current = 0;
   private menu = new MenuFilter();
 
-  constructor(private tuner: TunerView | null = null) {
+  constructor(private tuner: TunerView | null = null, private flow = false) {
     super();
   }
 
-  static async fromFile(filename: string, tuner: TunerView | null = null): Promise<GameManager> {
-    const gm = new GameManager(tuner);
+  /** `flow`: each mission is replaced by a card saying what it is (see
+   *  MissionCard), to go through the story's order without playing. */
+  static async fromFile(filename: string, tuner: TunerView | null = null, { flow = false } = {}): Promise<GameManager> {
+    const gm = new GameManager(tuner, flow);
     console.log(`GameManager: ${filename}`);
     for (const line of await readLines(filename)) {
       try {
@@ -70,7 +72,7 @@ export class GameManager extends GameComponent {
       st.setFilename(words[1]);
       gc = st;
     } else if (component === 'mission') {
-      gc = new Mission(words[1]);
+      gc = this.flow ? new MissionCard(words[1]) : new Mission(words[1]);
     } else if (component === 'blank') {
       const b = new Blank();
       const col = hexcolor(words[1]);

@@ -25,13 +25,16 @@ import { stage } from './game/stage.ts';
 // The title screen's choices. Each is a .game file; the modes are single
 // missions (data/missions/*.xml) that can later be slotted into the story.
 type Group = 'mode' | 'story' | 'extra';
-const GAMES: { file: string; title: string; note: string; group: Group }[] = [
+// `flow`: the missions replaced by cards saying what they are, to check the
+// story's flow without playing them.
+const GAMES: { file: string; title: string; note: string; group: Group; flow?: boolean }[] = [
   { group: 'mode', file: 'clear.game', title: 'Clear the Area', note: 'Eight kongs in the patrol area and no more coming: shoot them all down' },
   { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, no edge to the map, kongs everywhere: down as many as you can' },
   { group: 'mode', file: 'rooftops.game', title: 'Rooftops', note: 'Top-down, 1942 style: kongs on every roof, the plane heads up the screen and slides side to side' },
   { group: 'mode', file: 'rooftops_steer.game', title: 'Rooftops: Steering', note: 'Top-down with kongs on every roof; left and right turn the plane' },
   { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
   { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Straight in: five missions (kill three kongs, survive the bananas, save three blondes, survive again, the big rescue) with the story in between' },
+  { group: 'story', file: 'data/federal_monkey_patrol.game', flow: true, title: 'The Story: flow only', note: 'For checking the order: each mission is just a card saying what it is' },
   { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
   { group: 'extra', file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
 ];
@@ -67,9 +70,11 @@ skipLink.addEventListener('click', (e) => {
   skipToGame();
 });
 
-function gameUrl(file: string): string {
+function gameUrl(file: string, flow = false): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
+  if (flow) u.searchParams.set('flow', '1');
+  else u.searchParams.delete('flow');
   return u.pathname + u.search;
 }
 
@@ -121,13 +126,15 @@ function lastUpdated(): string {
 }
 
 function showMenu({ ended = false } = {}): void {
-  const chosen = new URLSearchParams(window.location.search).get('game');
+  const params = new URLSearchParams(window.location.search);
+  const chosen = params.get('game');
+  const chosenFlow = params.get('flow') === '1';
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
     : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
     : 'The End.';
   const link = (g: (typeof GAMES)[number], note = true): string => `
-    <a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen ? 'chosen' : ''}">
+    <a href="${gameUrl(g.file, g.flow)}" data-game="${g.file}"${g.flow ? ' data-flow="1"' : ''} class="${g.file === chosen && !!g.flow === chosenFlow ? 'chosen' : ''}">
       <span class="t">${g.title}</span>${note ? `<span class="n">${g.note}</span>` : ''}</a>`;
   const group = (k: Group): (typeof GAMES)[number][] => GAMES.filter((g) => g.group === k);
   overlay.innerHTML = `
@@ -155,13 +162,13 @@ function showMenu({ ended = false } = {}): void {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       window.history.replaceState(null, '', a.getAttribute('href'));
-      start(a.dataset.game ?? null);
+      start(a.dataset.game ?? null, a.dataset.flow === '1');
     });
   });
   (overlay.querySelector<HTMLAnchorElement>('a.chosen') ?? overlay.querySelector<HTMLAnchorElement>('a[data-game]'))?.focus();
 }
 
-async function start(file: string | null): Promise<void> {
+async function start(file: string | null, flow = false): Promise<void> {
   unlockAudio();
   overlay.hidden = true;
   canvas.focus();
@@ -170,7 +177,7 @@ async function start(file: string | null): Promise<void> {
     await settings.load();
     await loadFont();
     tuner = await Tuner.create();
-    game = await GameManager.fromFile(file || settings.gets('main', 'default_game'), tuner);
+    game = await GameManager.fromFile(file || settings.gets('main', 'default_game'), tuner, { flow });
   } catch (e) {
     console.error(e);
     overlay.innerHTML = `<div class="panel"><h1>Uncaught Exception</h1><pre>${String(e instanceof Error ? e.message : e)}</pre></div>`;

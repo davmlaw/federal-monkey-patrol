@@ -7,6 +7,7 @@ import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from './component.ts';
 import { FilmGrain } from './film.ts';
 import { makeLayer, stage } from './stage.ts';
+import { dircheck, settings } from '../core/settings.ts';
 
 const css = ([r, g, b]: readonly number[]): string => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
@@ -90,7 +91,7 @@ export class TitleCard extends GameComponent {
   override isDom = true;
   override status: Status = Status.PLAYING;
   private shown = 0;
-  private card: Card;
+  protected card: Card;
   ahead: GameComponent | null = null;
 
   constructor(text: string, private msecs: number) {
@@ -106,6 +107,29 @@ export class TitleCard extends GameComponent {
   }
 }
 
+/**
+ * In place of a mission when checking the story's flow (the menu's "flow
+ * only"): a card saying which mission goes here and what it is (the first
+ * sentence of the comment at the top of its XML).
+ */
+export class MissionCard extends TitleCard {
+  constructor(private file: string) {
+    super(`Mission|${file}`, 4000);
+  }
+
+  protected override async _load(): Promise<void> {
+    let about = '';
+    try {
+      const res = await fetch(`${dircheck(settings.gets('game', 'mission.dir'))}${this.file}`);
+      const m = /<!--([\s\S]*?)-->/.exec(await res.text());
+      about = (m?.[1] ?? '').replace(/\s+/g, ' ').trim();
+    } catch {
+      // (just the file name)
+    }
+    this.card = cardLayer(`Mission|${this.file}`, about);
+  }
+}
+
 /** A title card's layer; update() it each frame it's shown (the film). */
 export interface Card { layer: HTMLDivElement; update(): void }
 
@@ -113,11 +137,13 @@ export interface Card { layer: HTMLDivElement; update(): void }
  *  all sepia toned, with the grain changing slowly, so they match. */
 const SEPIA_FILM = { fps: 10, flicker: 0.07, strength: 0.8 };
 
-/** A title card (see TitleCard) saying `text` (`|` breaks a line). */
-export function cardLayer(text: string): Card {
+/** A title card (see TitleCard) saying `text` (`|` breaks a line), with
+ *  `note` in small type under it. */
+export function cardLayer(text: string, note = ''): Card {
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const lines = text.split('|').map((l) => `<span>${esc(l.trim())}</span>`).join('');
-  const layer = makeLayer('card', `<div class="frame"><div class="words">${lines}</div></div>`);
+  const small = note ? `<p class="note">${esc(note)}</p>` : '';
+  const layer = makeLayer('card', `<div class="frame"><div class="words">${lines}${small}</div></div>`);
   const film = new FilmGrain({ ...SEPIA_FILM, weave: layer.firstElementChild as HTMLElement });
   layer.append(film.el);
   return { layer, update: () => film.update() };

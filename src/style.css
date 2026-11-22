@@ -429,5 +429,13 @@ pre { white-space: pre-wrap; color: #f88; }
   text-shadow: 0 0 0.12em rgba(240, 220, 176, 0.35);
 }
 
+#stage .card .words .note {
+  margin: 0.6em 1.5em 0;
+  font-size: 0.32em;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  line-height: 1.4;
+}
+
 /* the film leader (`picture ... film`): sepia, like the cards */
 #stage .picture.sepia img { filter: sepia(0.85) saturate(1.3) brightness(0.9) contrast(1.05); }
