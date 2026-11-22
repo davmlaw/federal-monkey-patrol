@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- The story's fourth mission: Survive again, harder: top-down steering
+     (the view turns with the plane), more kongs throwing more often and
+     faster. -->
+<mission>
+
+<startconditions>
+  <height>1000</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <view>topdown</view>
+  <controls>steer</controls>
+  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="1500" health_min="2" health_max="4">30</kongs>
+  <!-- every kong in range and on screen throws one this often, at where
+       the plane will be when it reaches the top of its arc -->
+  <bananas every_msecs="1800" rise_secs="1.5">on</bananas>
+  <patrolradius>none</patrolradius>
+  <!-- the kongs close round the plane's path, so they come on screen -->
+  <roamradius>1200</roamradius>
+  <radar>off</radar>
+  <countdown>
+    <label>Survive</label>
+    <seconds>60</seconds>
+  </countdown>
+</startconditions>
+
+<outcomes>
+  <scenario>
+    <condition>
+      <stat name="game_seconds" op="gte" value="60" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>Still in one piece!</message>
+    </result>
+  </scenario>
+</outcomes>
+
+</mission>

@@ -40,7 +40,8 @@ export class Picture extends GameComponent {
   private timeDisplayed = 0;
   private color = [1, 1, 1];
   private layer: HTMLDivElement = makeLayer('picture');
-  /** `film` on the line: grain, flicker and scratches over it. */
+  /** `film` on the line: sepia toned, with grain, flicker and scratches
+   *  over it, like the title cards. */
   private film: FilmGrain | null = null;
 
   setFilename(f: string): void { this.filename = f; }
@@ -64,7 +65,8 @@ export class Picture extends GameComponent {
       this.layer.append(tint);
     }
     if (this.film) {
-      this.film = new FilmGrain({ weave: img });
+      this.film = new FilmGrain({ ...SEPIA_FILM, weave: img });
+      this.layer.classList.add('sepia');
       this.layer.append(this.film.el);
     }
   }
@@ -79,7 +81,7 @@ export class Picture extends GameComponent {
 
 /**
  * `card <msecs> <text>`: a silent-film title card, sepia lettering in a
- * border on dark brown, with slow film grain over it. `|` breaks a line. It shows
+ * border on dark brown, with slow film grain over it (all cards alike). `|` breaks a line. It shows
  * for `msecs`, and if the mission after it (`ahead`, set by the
  * GameManager, which loads it early) is still generating its city, until
  * that's ready, so the card covers the load bar.
@@ -93,7 +95,7 @@ export class TitleCard extends GameComponent {
 
   constructor(text: string, private msecs: number) {
     super();
-    this.card = cardLayer(text, { sepia: true });
+    this.card = cardLayer(text);
   }
 
   protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
@@ -107,16 +109,16 @@ export class TitleCard extends GameComponent {
 /** A title card's layer; update() it each frame it's shown (the film). */
 export interface Card { layer: HTMLDivElement; update(): void }
 
-/** A title card (see TitleCard) saying `text` (`|` breaks a line):
- *  white on black, or `sepia` toned with the grain changing more slowly. */
-export function cardLayer(text: string, { sepia = false } = {}): Card {
+/** Old film over the title cards and the film leader (`picture ... film`):
+ *  all sepia toned, with the grain changing slowly, so they match. */
+const SEPIA_FILM = { fps: 10, flicker: 0.07, strength: 0.8 };
+
+/** A title card (see TitleCard) saying `text` (`|` breaks a line). */
+export function cardLayer(text: string): Card {
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const lines = text.split('|').map((l) => `<span>${esc(l.trim())}</span>`).join('');
   const layer = makeLayer('card', `<div class="frame"><div class="words">${lines}</div></div>`);
-  if (sepia) layer.classList.add('sepia');
-  const film = new FilmGrain(sepia
-    ? { weave: layer.firstElementChild as HTMLElement, fps: 10, flicker: 0.07, strength: 0.8 }
-    : { weave: layer.firstElementChild as HTMLElement });
+  const film = new FilmGrain({ ...SEPIA_FILM, weave: layer.firstElementChild as HTMLElement });
   layer.append(film.el);
   return { layer, update: () => film.update() };
 }

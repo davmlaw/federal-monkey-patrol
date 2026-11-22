@@ -18,58 +18,98 @@ picture data/images/leader/leader_1.jpg 0 aaaaaa film
 blank 000000
 transition fade 200
 
+# Mission, story, mission, story...: the game starts straight away, and the
+# story (Harlow and the history of the Federal Monkey Patrol) comes in
+# short intermissions between the missions. The "Story" cards stand in for
+# them until they're cut down from the old cutscenes (data/story/, listed
+# in the comments where they might go).
+
 ################################
 ###   MISSION 1: 3 KONGS     ###
 ################################
 
-# (the card stays up while the mission's city is generated)
+# (a card stays up while the mission after it generates its city)
 card 2200 Kill|3 Kongs
 transition fade 600
 mission killmonkeys.xml
-
-transition fade 1000
-blank 000000
 transition fade 1000
 
-############# 
+################################
+###   STORY 1                ###
+################################
+# 1_intro/02janitors_office1.shot, 1_intro/03janitors_office2.shot
 
-storyteller 1_intro/01below_city_hall.shot
-storyteller 1_intro/02janitors_office1.shot
-storyteller 1_intro/03janitors_office2.shot
+card 2500 Story
+transition fade 500
 
-#mission tutorial.xml
+################################
+###   MISSION 2: SURVIVE     ###
+################################
+# top-down, 1942 controls, bananas
 
-
-
-storyteller 2_killmonkey/01police_hq.shot
-transition fade 1000
-storyteller 2_killmonkey/03lab.shot
-storyteller 2_killmonkey/04chief_office.shot
-
-
-
-storyteller 2_killmonkey/05slide_show.shot
-transition fade 1000
-blank 000000
-storyteller 2_killmonkey/06chief_office2.shot
-
-
-transition fade 1000
-blank 000000
+card 2200 Survive
+transition fade 600
+mission survive1.xml
 transition fade 1000
 
-#mission killmonkey.xml
+################################
+###   STORY 2                ###
+################################
+# 2_killmonkey/03lab.shot ... 06chief_office2.shot
 
-storyteller 3_rescue/all.shot
+card 2500 Story
+transition fade 500
 
-transition fade 1000
-blank 000000
-transition fade 1000
-#mission rescue.xml
+################################
+###   MISSION 3: 3 BLONDES   ###
+################################
+# Monkey Mayhem, with blondes
 
-storyteller 4_claw/all.shot
+card 2200 Save|3 Blondes
+transition fade 600
+mission saveblondes.xml
+transition fade 1000
 
+################################
+###   STORY 3                ###
+################################
+# 3_rescue/all.shot
+
+card 2500 Story
+transition fade 500
+
+################################
+###   MISSION 4: SURVIVE     ###
+################################
+# top-down, steering, harder
+
+card 2200 Survive|Again
+transition fade 600
+mission survive2.xml
 transition fade 1000
-blank 000000
+
+################################
+###   STORY 4                ###
+################################
+# 4_claw/all.shot (the backstory half)
+
+card 2500 Story
+transition fade 500
+
+################################
+###   MISSION 5: RESCUE      ###
+################################
+# the chase camera, blondes everywhere: lose one and it's over
+
+card 2200 Rescue 3 Blondes|Lose None
+transition fade 600
+mission rescue.xml
 transition fade 1000
-#mission claw.xml
+
+################################
+###   STORY 5: THE END       ###
+################################
+
+card 3000 Story
+transition fade 1000
+card 3000 The End

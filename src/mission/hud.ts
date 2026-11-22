@@ -107,33 +107,42 @@ export class LivesDisplay extends Drawable2D {
   }
 }
 
-/** A blonde, for her icons: an abstract symbol, not a face: a plain round
- *  head with two locks of golden hair hanging below it either side, flat
- *  colours outlined dark so it shows on anything. Drawn into `g` round
- *  (cx, cy), `r` the head's radius (the locks reach about 1.5 r down). */
+/** A blonde, for her icons: a symbol of blondness, all in one golden line
+ *  with no fill: the head a plain circle, and round it a 1930s bob, swept
+ *  over from a side parting and curling up at the ends below the chin.
+ *  A soft dark shadow keeps it showing on anything. Drawn into `g` round
+ *  (cx, cy), `r` the head's radius (the hair reaches about 1.5 r out). */
 export function drawBlondeHead(g: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
-  const ink = '#2a1d08';
+  g.save();
   g.lineJoin = 'round';
-  g.lineWidth = Math.max(1.5, r * 0.14);
-  g.strokeStyle = ink;
+  g.lineCap = 'round';
+  g.lineWidth = Math.max(1.5, r * 0.17);
+  g.strokeStyle = '#f2c230';
+  g.shadowColor = 'rgba(0, 0, 0, 0.8)';
+  g.shadowBlur = Math.max(1, r * 0.15);
+  const x = (u: number): number => cx + u * r;
+  const y = (v: number): number => cy + v * r;
   // the head
   g.beginPath();
   g.arc(cx, cy, r, 0, Math.PI * 2);
-  g.fillStyle = '#f4e8c8';
-  g.fill();
   g.stroke();
-  // the hair: two locks falling from the sides of the head to below it,
-  // flicking out a little at the ends
-  g.fillStyle = '#e8b020';
-  for (const s of [-1, 1]) {
-    const lock = new Path2D();
-    lock.moveTo(cx + s * 0.62 * r, cy + 0.05 * r);
-    lock.quadraticCurveTo(cx + s * 0.62 * r, cy + 1.0 * r, cx + s * 1.25 * r, cy + 1.5 * r);
-    lock.quadraticCurveTo(cx + s * 1.25 * r, cy + 0.5 * r, cx + s * 0.95 * r, cy - 0.4 * r);
-    lock.closePath();
-    g.fill(lock);
-    g.stroke(lock);
-  }
+  // the bob's outline: from a curl under the left of the jaw, up round
+  // the head and down to a curl under the right
+  g.beginPath();
+  g.moveTo(x(-0.75), y(1.05));
+  g.bezierCurveTo(x(-0.95), y(1.45), x(-1.5), y(1.3), x(-1.4), y(0.75));
+  g.bezierCurveTo(x(-1.65), y(-0.2), x(-1.35), y(-1.45), x(0), y(-1.45));
+  g.bezierCurveTo(x(1.35), y(-1.45), x(1.65), y(-0.2), x(1.4), y(0.75));
+  g.bezierCurveTo(x(1.5), y(1.3), x(0.95), y(1.45), x(0.75), y(1.05));
+  g.stroke();
+  // a side parting: the hair swept over from it, down to the head
+  g.beginPath();
+  g.moveTo(x(-0.45), y(-1.4));
+  g.quadraticCurveTo(x(-0.75), y(-1.0), x(-0.62), y(-0.79));
+  g.moveTo(x(-0.45), y(-1.4));
+  g.quadraticCurveTo(x(0.3), y(-0.75), x(0.92), y(-0.38));
+  g.stroke();
+  g.restore();
 }
 
 let blondeIcon: THREE.Texture | null = null;

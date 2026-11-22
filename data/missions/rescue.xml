@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- The story's last mission: the patrol area, the chase camera, and kongs
+     carrying off blondes all over. Catch three; let one land and it's game
+     over. -->
+<mission>
+
+<startconditions>
+  <height>600</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <kongs respawn_msecs="4000" climb_chance="0.6">6</kongs>
+  <blondes grab_chance="1" max="6">on</blondes>
+</startconditions>
+
+<outcomes>
+  <scenario>
+    <condition>
+      <stat name="blonde_rescues" op="gte" value="3" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>Three blondes saved! The city is yours, Harlow.</message>
+    </result>
+  </scenario>
+  <scenario>
+    <condition>
+      <stat name="blonde_casualties" op="gte" value="1" />
+    </condition>
+    <result>
+      <value>lost</value>
+      <message>She didn't make it. Game over</message>
+    </result>
+  </scenario>
+</outcomes>
+
+</mission>

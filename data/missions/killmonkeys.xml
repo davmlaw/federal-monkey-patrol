@@ -10,6 +10,8 @@
     <skin>biplane_skin.jpg</skin>
   </model>
   <kongs respawn_msecs="never">3</kongs>
+  <!-- just kongs climbing about: no blondes yet -->
+  <blondes>off</blondes>
 </startconditions>
 
 <outcomes>

@@ -7,7 +7,7 @@
 //
 // URL parameters:
 //   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
-//                     blonde, icons, kongfall, gameover
+//                     blonde, icons, kongfall, gameover, bananas
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -146,6 +146,28 @@ export class Harness {
 type Scenario = (h: Harness) => void | Promise<void>;
 
 const SCENARIOS: Record<string, Scenario> = {
+  /** Kongs throwing bananas (use mission=survive1.xml or survive2.xml):
+   *  fly straight on, not dodging, for `secs` (default 12), a frame each
+   *  second (drawn every step: kongs only throw when on screen). Checks
+   *  bananas are thrown and that one brings the plane down. */
+  bananas(h) {
+    const b = h.mission.bananas;
+    if (!b) throw new Error('no bananas in this mission (try mission=survive1.xml)');
+    const secs = num('secs', 12);
+    let most = 0;
+    for (let i = 0; i < secs; i++) {
+      for (let f = 0; f < 10; f++) {
+        h.frame('', 3, 33);
+        h.shots.lastElementChild?.remove();
+        most = Math.max(most, b.count);
+      }
+      h.frame(`${b.count} bananas in the air, ${gamestats.get(Stat.PLAYER_DEATHS)} planes lost`, 1, 1);
+    }
+    h.log(`${b.thrown} thrown, at most ${most} in the air at once; ${gamestats.get(Stat.PLAYER_DEATHS)} planes lost`);
+    h.check(most > 0, 'the kongs throw bananas');
+    h.check(gamestats.get(Stat.PLAYER_DEATHS) > 0, 'a banana brings the plane down when it flies straight on');
+  },
+
   /** Fly straight on for `secs`, a full frame (with the HUD) each second. */
   hud(h) {
     h.plane.charmed = true;

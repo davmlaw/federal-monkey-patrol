@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- The story's second mission: top-down with 1942 controls, kongs on the
+     roofs throwing bananas. Dodge them (and shoot the kongs, so fewer are
+     throwing) for a minute. -->
+<mission>
+
+<startconditions>
+  <height>1000</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <view>topdown</view>
+  <controls>1942</controls>
+  <kongs on="rooftops" tower_min="500" height="180" respawn_msecs="1500" health_min="2" health_max="4">20</kongs>
+  <!-- every kong in range and on screen throws one this often, at where
+       the plane will be when it reaches the top of its arc -->
+  <bananas every_msecs="2600" rise_secs="1.8">on</bananas>
+  <patrolradius>none</patrolradius>
+  <!-- the kongs close round the plane's path, so they come on screen -->
+  <roamradius>1200</roamradius>
+  <radar>off</radar>
+  <countdown>
+    <label>Survive</label>
+    <seconds>60</seconds>
+  </countdown>
+</startconditions>
+
+<outcomes>
+  <scenario>
+    <condition>
+      <stat name="game_seconds" op="gte" value="60" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>You made it through!</message>
+    </result>
+  </scenario>
+</outcomes>
+
+</mission>

@@ -15,6 +15,7 @@ import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCoun
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 import { Finale } from './finale.ts';
+import { Bananas, DEFAULT_BANANAS, type BananaOptions } from './bananas.ts';
 import { patchSeeThrough } from './seethrough.ts';
 
 // Top-down mode flies this far above the tallest building around the plane
@@ -136,6 +137,9 @@ export class Mission extends GameComponent {
    *  area (game.properties roam_radius) goes along with the plane, centred
    *  a little ahead of it. */
   private roaming = false;
+  /** <roamradius>: the roaming kongs' area's radius (game.properties
+   *  roam_radius otherwise). */
+  private roamRadius: number | null = null;
   /** Kongs downed (or left), as a kong's head and "x3". */
   private tally!: IconTally;
   /** Blondes caught, under the kongs (when there are blondes). */
@@ -145,6 +149,9 @@ export class Mission extends GameComponent {
   private ending: { status: Status; msecs: number } | null = null;
   private banner = new Banner();
   kongs: KongTroop | null = null;
+  /** <bananas> in <startconditions>: the kongs throw them at the plane. */
+  private bananaOptions: BananaOptions | null = null;
+  bananas: Bananas | null = null;
   cameraman!: CameraMan;
   player!: Player;
   world: World | null = null;
@@ -176,7 +183,7 @@ export class Mission extends GameComponent {
     }
     if (this.countdowntimer) this.hud.add(this.countdowntimer, TOP | RIGHT);
     const pos = this.player.entity.object.position;
-    const radius = this.roaming ? settings.getf('game', 'roam_radius') || 2500 : this.patrolRadius;
+    const radius = this.roaming ? this.roamRadius ?? (settings.getf('game', 'roam_radius') || 2500) : this.patrolRadius;
     this.patrol = { x: pos.x, z: pos.z, r: radius ?? (settings.getf('game', 'patrol_radius') || 3200) };
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
     if (this.showRadar) {
@@ -202,6 +209,7 @@ export class Mission extends GameComponent {
     patchSeeThrough(grid.group); // (for the game-over shot, compiled in now)
     this.world.addEntity(this.player.entity);
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
+    if (this.bananaOptions) this.bananas = new Bananas({ ...this.bananaOptions, flat: this.flyMode === FlyMode.TOPDOWN }, this.world);
     this.tally = new IconTally(this.kongs.portrait(theDisplay.renderer), 0.22, this.kongs.respawns ? '' : 'LEFT');
     this.hud.add(this.tally, TOP);
     this.tally.position.y -= 0.06; // below the pause button
@@ -234,7 +242,8 @@ export class Mission extends GameComponent {
       if (c.dec) this.claw.dec = parseFloat(c.dec) / 100;
       if (c.heightfactor) this.claw.heightFactor = parseFloat(c.heightfactor);
     }
-    // <kongs respawn_msecs="N" health_min="N" health_max="N" height="N" on="rooftops">count</kongs>,
+    // <kongs respawn_msecs="N" health_min="N" health_max="N" height="N" climb_chance="N"
+    // on="rooftops" tower_min="N">count</kongs>,
     // with respawn_msecs="never" for a fixed number to clear, and
     // on="rooftops" to have them all up on the roofs
     if (sc.kongs) {
@@ -250,6 +259,33 @@ export class Mission extends GameComponent {
         height: num('height'),
         healthMin: num('health_min'),
         healthMax: num('health_max'),
+        climbChance: num('climb_chance'),
+        towerMin: num('tower_min'),
+      };
+    }
+    // <blondes grab_chance="N" max="N">on|off</blondes> (on by default,
+    // except in the rooftop modes)
+    if (sc.blondes) {
+      const b = sc.blondes;
+      const num = (name: string): number | undefined => {
+        const v = parseFloat(b.getAttribute(name) ?? '');
+        return Number.isFinite(v) ? v : undefined;
+      };
+      this.kongOptions.blondes = (b.textContent ?? '').trim().toLowerCase() === 'off'
+        ? false : { grabChance: num('grab_chance'), maxBlondes: num('max') };
+    }
+    // <bananas every_msecs="N" rise_secs="N" range="N" hit_radius="N">on</bananas>
+    if (sc.bananas && (sc.bananas.textContent ?? '').trim().toLowerCase() !== 'off') {
+      const b = sc.bananas;
+      const num = (name: string, d: number): number => {
+        const v = parseFloat(b.getAttribute(name) ?? '');
+        return Number.isFinite(v) ? v : d;
+      };
+      this.bananaOptions = {
+        everyMsecs: num('every_msecs', DEFAULT_BANANAS.everyMsecs),
+        riseSecs: num('rise_secs', DEFAULT_BANANAS.riseSecs),
+        range: num('range', DEFAULT_BANANAS.range),
+        hitRadius: num('hit_radius', DEFAULT_BANANAS.hitRadius),
       };
     }
     if (sc.patrolradius) {
@@ -257,6 +293,7 @@ export class Mission extends GameComponent {
       if (t === 'none') this.roaming = true;
       else this.patrolRadius = parseFloat(t) || null;
     }
+    if (sc.roamradius) this.roamRadius = parseFloat(sc.roamradius.textContent ?? '') || null;
     this.player = await Player.create(model.name ?? '', model.skin ?? '', startHeight);
     const text = (e: Element | undefined): string => (e?.textContent ?? '').trim().toLowerCase();
     if (text(sc.view) === 'topdown') this.flyMode = FlyMode.TOPDOWN;
@@ -334,6 +371,7 @@ export class Mission extends GameComponent {
     const wasCrashed = plane.crashed;
     if (!wasCrashed) this.constraints?.restrict(this.player);
     this.kongs?.update(world, msecs, plane.object);
+    if (this.kongs && !this.finale) this.bananas?.update(world, msecs, this.kongs.living(), plane);
     world.update(msecs);
     if (this.kongs) {
       gamestats.set(Stat.MONKEY_POPULATION, this.kongs.remaining());
@@ -471,6 +509,7 @@ export class Mission extends GameComponent {
 
   override dispose(): void {
     this.finale?.dispose();
+    this.bananas?.dispose();
     this.world?.dispose();
     this.world = null;
   }

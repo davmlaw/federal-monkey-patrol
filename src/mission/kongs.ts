@@ -774,8 +774,11 @@ const SPAWN_APART = 600;
 // easy to see: on flat spots within the top TOWER_TOP of the tower's
 // highest place to stand, on towers whose top is at least TOWER_MIN (the
 // tallest reach about 2000; a quarter of blocks have one over about 1400).
+// A mission's tower_min instead allows any flat roof at least that tall.
 // With no such spot free, a kong waits to come.
 const TOWER_MIN = 1200;
+/** Where to look for a place to stand on a roof, for tower_min. */
+const ROOF_GRID: [number, number][] = [0.1, 0.3, 0.5, 0.7, 0.9].flatMap((fx) => [0.1, 0.3, 0.5, 0.7, 0.9].map((fz): [number, number] => [fx, fz]));
 const TOWER_TOP = 0.1;
 const PERCH_APART = 0.65; // kongs sharing a tower top stand this many heights apart
 // The game-over shot finds a kong (or puts one) within this of the camera.
@@ -795,6 +798,14 @@ export interface TroopOptions {
   height?: number;
   /** All of them up on the skyscrapers, staying there. */
   rooftops?: boolean;
+  /** Rooftop kongs: on any flat roof at least this tall (otherwise near
+   *  the tops of towers of TOWER_MIN and up). */
+  towerMin?: number;
+  /** Chance of climbing at each crossing (kong.properties' climb_chance). */
+  climbChance?: number;
+  /** Blondes for them to carry off (never in the rooftop modes): false for
+   *  none, or blonde.properties' grab_chance and max_blondes overridden. */
+  blondes?: false | { grabChance?: number; maxBlondes?: number };
 }
 
 // A kong this far from the middle of the area (in radii) has been left
@@ -810,6 +821,9 @@ export class KongTroop {
   /** No more come once these are down. */
   readonly respawns: boolean;
   readonly rooftops: boolean;
+  /** Any flat roof this tall (the mission's tower_min), or null: the tops
+   *  of towers of TOWER_MIN and up. */
+  private roofMin: number | null;
   /** towerSpots(), by block. */
   private spots = new Map<string, [number, number, number][]>();
   public count: number;
@@ -820,16 +834,23 @@ export class KongTroop {
     private cfg: KongConfig,
     opts: TroopOptions,
     readonly area: Area,
-    /** Blondes for them to carry off (null in the rooftop modes). */
+    /** Blondes for them to carry off (null in the rooftop modes, or with
+     *  opts.blondes false). */
     readonly blondes: BlondeKit | null,
   ) {
     this.count = opts.count ?? cfg.count;
     this.respawns = opts.respawnMsecs !== null;
     this.rooftops = !!opts.rooftops;
+    this.roofMin = opts.towerMin ?? null;
     if (opts.height) cfg.height = opts.height;
     if (opts.respawnMsecs != null) cfg.respawnMsecs = opts.respawnMsecs;
     if (opts.healthMin != null) cfg.healthMin = opts.healthMin;
     if (opts.healthMax != null) cfg.healthMax = Math.max(cfg.healthMin, opts.healthMax);
+    if (opts.climbChance != null) cfg.climbChance = opts.climbChance;
+    if (blondes && opts.blondes) {
+      if (opts.blondes.grabChance != null) blondes.cfg.grabChance = opts.blondes.grabChance;
+      if (opts.blondes.maxBlondes != null) blondes.cfg.maxBlondes = opts.blondes.maxBlondes;
+    }
   }
 
   /** They keep to `area`. */
@@ -838,7 +859,7 @@ export class KongTroop {
     const [proto, roar, blondes] = await Promise.all([
       loadModel(cfg.model, cfg.skin),
       loadSound('data/sound/sfx/kong_roar.wav'),
-      opts.rooftops ? null : BlondeKit.create(),
+      opts.rooftops || opts.blondes === false ? null : BlondeKit.create(),
     ]);
     return new KongTroop(proto, roar, cfg, opts, area, blondes);
   }
@@ -963,21 +984,25 @@ export class KongTroop {
     };
     const spots: [number, number, number][] = [];
     for (const b of boxes) {
-      if (b.y1 < TOWER_MIN * (1 - TOWER_TOP)) continue;
-      // the middle of its top and halfway out to the corners
-      for (const [fx, fz] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+      if (b.y1 < (this.roofMin ?? TOWER_MIN * (1 - TOWER_TOP))) continue;
+      // the middle of its top and halfway out to the corners (any roof: a
+      // grid over it, and the top of a crown will do: seen from above, a
+      // kong astride a spire)
+      const any = this.roofMin !== null;
+      for (const [fx, fz] of any ? ROOF_GRID : [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
         const x = b.x0 + (b.x1 - b.x0) * fx;
         const z = b.z0 + (b.z1 - b.z0) * fz;
         const y = roofAt(x, z);
         if (y === null || Math.abs(y - b.y1) > 0.5) continue; // something on top of it
-        if (![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
+        if (!any && ![[e, 0], [-e, 0], [0, e], [0, -e]].every(([ox, oz]) => roofAt(x + ox, z + oz) === y)) continue;
         if (spots.some(([sx, , sz]) => Math.hypot(sx - x, sz - z) < PERCH_APART * this.cfg.height)) continue;
         spots.push([x, y, z]);
       }
     }
     // only near the top: the highest spot's level and a little below it
     const top = Math.max(0, ...spots.map((p) => p[1]));
-    const high = top >= TOWER_MIN ? spots.filter((p) => p[1] >= top * (1 - TOWER_TOP)) : [];
+    const high = this.roofMin !== null ? spots
+      : top >= TOWER_MIN ? spots.filter((p) => p[1] >= top * (1 - TOWER_TOP)) : [];
     this.spots.set(key, high);
     return high;
   }

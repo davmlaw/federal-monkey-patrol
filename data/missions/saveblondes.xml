@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- The story's third mission: Monkey Mayhem with blondes. Kongs all round
+     the plane wherever it flies, carrying blondes off up the towers; catch
+     three as they fall. No time limit. -->
+<mission>
+
+<startconditions>
+  <height>600</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.5">40</kongs>
+  <blondes grab_chance="0.9" max="3">on</blondes>
+  <patrolradius>none</patrolradius>
+</startconditions>
+
+<outcomes>
+  <scenario>
+    <condition>
+      <stat name="blonde_rescues" op="gte" value="3" />
+    </condition>
+    <result>
+      <value>next</value>
+      <message>Three blondes saved!</message>
+    </result>
+  </scenario>
+</outcomes>
+
+</mission>
