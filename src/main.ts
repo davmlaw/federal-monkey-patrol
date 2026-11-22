@@ -15,41 +15,34 @@ import { Status } from './game/component.ts';
 import { GameManager } from './game/manager.ts';
 import { stopMusic } from './game/simple.ts';
 import { gamestats } from './mission/stats.ts';
-import { Tuner } from './tuner.ts';
 import { TouchControls } from './core/touch.ts';
 import { lastResult, Mission } from './mission/mission.ts';
 import { FlyMode } from './mission/world.ts';
 import { StoryTeller } from './game/storyteller.ts';
 import { stage } from './game/stage.ts';
 
-// The title screen's choices. Each is a .game file; the modes are single
-// missions (data/missions/*.xml) that can later be slotted into the story.
-type Group = 'mode' | 'story' | 'extra';
-// `flow`: the missions replaced by cards saying what they are, to check the
-// story's flow without playing them.
-const GAMES: { file: string; title: string; note: string; group: Group; flow?: boolean }[] = [
-  { group: 'mode', file: 'clear.game', title: 'Clear the Area', note: 'Eight kongs in the patrol area and no more coming: shoot them all down' },
-  { group: 'mode', file: 'mayhem.game', title: 'Monkey Mayhem', note: 'Three minutes, no edge to the map, kongs everywhere: down as many as you can' },
-  { group: 'mode', file: 'rooftops.game', title: 'Rooftops', note: 'Top-down, 1942 style: kongs on every roof, the plane heads up the screen and slides side to side' },
-  { group: 'mode', file: 'rooftops_steer.game', title: 'Rooftops: Steering', note: 'Top-down with kongs on every roof; left and right turn the plane' },
-  { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
-  { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Straight in: five missions (kill three kongs, survive the bananas, save three blondes, survive again, the big rescue) with the story in between' },
-  { group: 'story', file: 'data/federal_monkey_patrol.game', flow: true, title: 'The Story: flow only', note: 'For checking the order: each mission is just a card saying what it is' },
-  { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
-  { group: 'extra', file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
+// The title screen's choices, each a .game file: the story, then free
+// play (single missions, data/missions/*.xml), then extras.
+type Group = 'story' | 'free' | 'extra';
+const GAMES: { file: string; title: string; group: Group }[] = [
+  { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story' },
+  { group: 'free', file: 'freeplay.game', title: 'Free Play' },
+  { group: 'free', file: 'rooftops.game', title: 'Rooftops (top-down)' },
+  { group: 'free', file: 'rooftops_steer.game', title: 'Rooftops: Steering (top-down)' },
+  { group: 'extra', file: 'mission.game', title: 'Test mission' },
+  { group: 'extra', file: 'fade_test.game', title: 'Transitions' },
 ];
 // The story's missions, in order, for the menu's "Jump to mission" links
 // (?mission=N starts the story at the Nth's title card).
 const STORY_FILE = 'data/federal_monkey_patrol.game';
-const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Mayhem: Save 3 Blondes, Lose None, Kill 5 Kongs'];
+const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Save 3 Blondes, Lose None, Kill 5 Kongs'];
 // "Skip to game" from a story with no missions in it
-const FREE_FLIGHT = 'fly.game';
+const FREE_FLIGHT = 'freeplay.game';
 
 const overlay = document.getElementById('overlay') as HTMLDivElement;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 
 let game: GameManager | null = null;
-let tuner: Tuner | null = null;
 let inputmanager: InputManager | null = null;
 let touch: TouchControls | null = null;
 let running = false;
@@ -74,11 +67,10 @@ skipLink.addEventListener('click', (e) => {
   skipToGame();
 });
 
-function gameUrl(file: string, flow = false, mission = 0): string {
+function gameUrl(file: string, mission = 0): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
-  if (flow) u.searchParams.set('flow', '1');
-  else u.searchParams.delete('flow');
+  u.searchParams.delete('flow');
   if (mission) u.searchParams.set('mission', String(mission));
   else u.searchParams.delete('mission');
   return u.pathname + u.search;
@@ -134,33 +126,29 @@ function lastUpdated(): string {
 function showMenu({ ended = false } = {}): void {
   const params = new URLSearchParams(window.location.search);
   const chosen = params.get('game');
-  const chosenFlow = params.get('flow') === '1';
   const chosenMission = parseInt(params.get('mission') ?? '', 10) || 0;
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
     : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
     : 'The End.';
-  const link = (g: (typeof GAMES)[number], note = true): string => `
-    <a href="${gameUrl(g.file, g.flow)}" data-game="${g.file}"${g.flow ? ' data-flow="1"' : ''} class="${g.file === chosen && !!g.flow === chosenFlow && !chosenMission ? 'chosen' : ''}">
-      <span class="t">${g.title}</span>${note ? `<span class="n">${g.note}</span>` : ''}</a>`;
+  const link = (g: (typeof GAMES)[number]): string => `
+    <a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen && !chosenMission ? 'chosen' : ''}">
+      <span class="t">${g.title}</span></a>`;
   const group = (k: Group): (typeof GAMES)[number][] => GAMES.filter((g) => g.group === k);
   overlay.innerHTML = `
     <div class="panel">
       <h1>Federal Monkey Patrol</h1>
       <p class="sub">${sub}</p>
-      <h2>Game modes</h2>
-      <ul class="games">${group('mode').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
       <h2>Story</h2>
       <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
-      <p class="extras">Jump to mission: ${STORY_MISSIONS.map((t, i) => `<a href="${gameUrl(STORY_FILE, false, i + 1)}" data-game="${STORY_FILE}" data-mission="${i + 1}"
+      <h2>Free play</h2>
+      <ul class="games">${group('free').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
+      <p class="extras">Jump to mission: ${STORY_MISSIONS.map((t, i) => `<a href="${gameUrl(STORY_FILE, i + 1)}" data-game="${STORY_FILE}" data-mission="${i + 1}"
         class="${chosen === STORY_FILE && chosenMission === i + 1 ? 'chosen' : ''}">${i + 1}. ${t}</a>`).join(' &middot; ')}</p>
-      <p class="extras">Extras: ${group('extra').map((g) => link(g, false)).join(' &middot; ')}
+      <p class="extras">Extras: ${group('extra').map((g) => link(g)).join(' &middot; ')}
         &middot; <a href="kongtest.html">Kong &amp; blonde animations</a></p>
-      <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Ctrl: bombs &middot;
-        In the top-down modes up and down change speed, and bullets find kongs at any height &middot; Insert or <kbd>\`</kbd>: tuner &middot; Esc: pause / quit.
-        Kongs carry blondes up the skyscrapers: shoot the kong, then fly through her as she falls to catch her.
-        In the story, tap, click, Space or Enter for the next line.
-        On a touch screen, use the on-screen stick, throttle and buttons.</p>
+      <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Esc: pause &middot;
+        Top-down: up / down change speed &middot; Touch: on-screen stick, throttle and fire.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
         Turn on hardware acceleration in the browser's settings (or check chrome://gpu).</p>` : ''}
       <p class="foot"><a href="https://github.com/davmlaw/federal-monkey-patrol">Source on GitHub</a> &middot; GPL v2
@@ -171,14 +159,14 @@ function showMenu({ ended = false } = {}): void {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       window.history.replaceState(null, '', a.getAttribute('href'));
-      start(a.dataset.game ?? null, a.dataset.flow === '1', parseInt(a.dataset.mission ?? '', 10) || 0);
+      start(a.dataset.game ?? null, parseInt(a.dataset.mission ?? '', 10) || 0);
     });
   });
   (overlay.querySelector<HTMLAnchorElement>('a.chosen') ?? overlay.querySelector<HTMLAnchorElement>('a[data-game]'))?.focus();
 }
 
 /** `mission`: start the story at its Nth mission (0: the beginning). */
-async function start(file: string | null, flow = false, mission = 0): Promise<void> {
+async function start(file: string | null, mission = 0): Promise<void> {
   unlockAudio();
   overlay.hidden = true;
   canvas.focus();
@@ -186,8 +174,7 @@ async function start(file: string | null, flow = false, mission = 0): Promise<vo
   try {
     await settings.load();
     await loadFont();
-    tuner = await Tuner.create();
-    game = await GameManager.fromFile(file || settings.gets('main', 'default_game'), tuner, { flow });
+    game = await GameManager.fromFile(file || settings.gets('main', 'default_game'));
     if (mission && !game.startAtMission(mission)) console.warn(`no mission ${mission} in ${file}`);
   } catch (e) {
     console.error(e);
@@ -228,7 +215,7 @@ async function start(file: string | null, flow = false, mission = 0): Promise<vo
       else g.play(display, msecs, input);
       // on-screen flight controls only while flying a mission
       const player = c instanceof Mission && c.loaded && !c.loadError && !c.cinematic ? c.player : null;
-      tc.setVisible(!!player && !paused && !tuner?.visible);
+      tc.setVisible(!!player && !paused);
       if (player) tc.showThrottle(player.mode === FlyMode.FOLLOW);
       stage.endFrame();
       pauseBtn.hidden = paused;
@@ -257,8 +244,6 @@ function stop(): void {
   stopMusic();
   game?.dispose();
   game = null;
-  tuner?.dispose();
-  tuner = null;
   inputmanager?.dispose();
   inputmanager = null;
   touch?.dispose();

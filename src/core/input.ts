@@ -3,7 +3,7 @@
 
 // NEXT: a tap or click on the game screen (moves story dialogue on).
 // QUIT (Esc) now opens the pause menu rather than quitting straight away.
-export const Button = { NONE: -1, FIRE1: 0, FIRE2: 1, QUIT: 2, TUNER: 3, NEXT: 4 } as const;
+export const Button = { NONE: -1, FIRE1: 0, QUIT: 2, NEXT: 4 } as const;
 export type Button = (typeof Button)[keyof typeof Button];
 const NUM_BUTTONS = 5;
 
@@ -52,17 +52,11 @@ export class Input {
   }
 }
 
-// Backquote is an extra tuner key,
-// since many laptop keyboards have no Insert key.
 const KEYS: Partial<Record<string, Button>> = {
   Space: Button.FIRE1,
   Enter: Button.FIRE1,
   NumpadEnter: Button.FIRE1,
-  ControlLeft: Button.FIRE2,
-  ControlRight: Button.FIRE2,
   Escape: Button.QUIT,
-  Insert: Button.TUNER,
-  Backquote: Button.TUNER,
 };
 
 class Keyboard implements InputDevice {
@@ -109,10 +103,10 @@ class Keyboard implements InputDevice {
   }
 }
 
-// Gamepad: axis 0/1 with a dead zone, buttons 0/1 fire, 8 the tuner; the
+// Gamepad: axis 0/1 with a dead zone, buttons 0/1 fire; the
 // triggers (6/7) move the throttle.
 const TOLERANCE = 0.1;
-const PAD_BUTTONS: Record<number, Button> = { 0: Button.FIRE1, 1: Button.FIRE2, 8: Button.TUNER };
+const PAD_BUTTONS: Record<number, Button> = { 0: Button.FIRE1, 1: Button.FIRE1 };
 
 class Joystick implements InputDevice {
   private axis: Axis = { x: 0, y: 0 };
@@ -206,20 +200,16 @@ export class InputManager {
   dispose(): void { for (const d of this.devices) d.dispose(); }
 }
 
-/** Reads the requests common to every component (tuner, quit) from the Input. */
+/** Reads the requests common to every component (quit) from the Input. */
 export class InputFilter {
-  requestTuner = false;
   requestQuit = false;
 
   read(input: Input): void {
-    this.requestTuner = input.buttonToggled(Button.TUNER);
     this.requestQuit = input.buttonPressed(Button.QUIT);
     this._read(input);
   }
 
   protected _read(_input: Input): void {}
-
-  tuner(): boolean { return this.requestTuner; }
 
   quit(): boolean { return this.requestQuit; }
 }

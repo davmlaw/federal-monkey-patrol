@@ -3,11 +3,10 @@
 
 import { loadSound, playSound, type SoundHandle } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
-import { TapWatch, type Input } from '../core/input.ts';
+import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from './component.ts';
 import { FilmGrain } from './film.ts';
 import { makeLayer, stage } from './stage.ts';
-import { dircheck, settings } from '../core/settings.ts';
 
 const css = ([r, g, b]: readonly number[]): string => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
@@ -93,45 +92,17 @@ export class TitleCard extends GameComponent {
   private shown = 0;
   protected card: Card;
   ahead: GameComponent | null = null;
-  /** Checking the story's flow: stays up until tapped (or Space/Enter). */
-  holdForTap = false;
-  private taps = new TapWatch();
 
   constructor(text: string, private msecs: number) {
     super();
     this.card = cardLayer(text);
   }
 
-  protected override _play(_display: Display, msecs: number, input: Input | null, alpha: number): void {
+  protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
     this.shown += msecs;
     this.card.update();
     stage.show(this.card.layer, alpha);
-    const tapped = this.holdForTap && this.taps.tapped(input);
-    const up = this.holdForTap ? tapped : this.shown >= this.msecs;
-    if (up && (!this.ahead || this.ahead.loaded)) this.status = Status.NEXT;
-  }
-}
-
-/**
- * In place of a mission when checking the story's flow (the menu's "flow
- * only"): a card saying which mission goes here and what it is (the first
- * sentence of the comment at the top of its XML).
- */
-export class MissionCard extends TitleCard {
-  constructor(private file: string) {
-    super(`Mission|${file}`, 4000);
-  }
-
-  protected override async _load(): Promise<void> {
-    let about = '';
-    try {
-      const res = await fetch(`${dircheck(settings.gets('game', 'mission.dir'))}${this.file}`);
-      const m = /<!--([\s\S]*?)-->/.exec(await res.text());
-      about = (m?.[1] ?? '').replace(/\s+/g, ' ').trim();
-    } catch {
-      // (just the file name)
-    }
-    this.card = cardLayer(`Mission|${this.file}`, about);
+    if (this.shown >= this.msecs && (!this.ahead || this.ahead.loaded)) this.status = Status.NEXT;
   }
 }
 

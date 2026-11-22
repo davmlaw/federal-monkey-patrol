@@ -11,7 +11,7 @@ import type { Display } from '../core/display.ts';
 import { MenuFilter, type Input } from '../core/input.ts';
 import { hexcolor } from '../core/settings.ts';
 import { GameComponent, Status } from './component.ts';
-import { Blank, MissionCard, Picture, SoundTrack, TitleCard } from './simple.ts';
+import { Blank, Picture, SoundTrack, TitleCard } from './simple.ts';
 import { StoryTeller } from './storyteller.ts';
 import { makeTransition, Transition } from './transition.ts';
 import { Mission } from '../mission/mission.ts';
@@ -19,11 +19,6 @@ import { Mission } from '../mission/mission.ts';
 // Components worth loading ahead of time (missions generate a whole city,
 // so they load when reached, behind the load bar).
 const PREFETCH_AHEAD = 4;
-
-/** What the manager needs of the tuner: shown while the tuner key is toggled on. */
-export interface TunerView {
-  setVisible(visible: boolean): void;
-}
 
 export class GameManager extends GameComponent {
   override status: Status = Status.PLAYING;
@@ -33,14 +28,8 @@ export class GameManager extends GameComponent {
   current = 0;
   private menu = new MenuFilter();
 
-  constructor(private tuner: TunerView | null = null, private flow = false) {
-    super();
-  }
-
-  /** `flow`: each mission is replaced by a card saying what it is (see
-   *  MissionCard), to go through the story's order without playing. */
-  static async fromFile(filename: string, tuner: TunerView | null = null, { flow = false } = {}): Promise<GameManager> {
-    const gm = new GameManager(tuner, flow);
+  static async fromFile(filename: string): Promise<GameManager> {
+    const gm = new GameManager();
     console.log(`GameManager: ${filename}`);
     for (const line of await readLines(filename)) {
       try {
@@ -72,7 +61,7 @@ export class GameManager extends GameComponent {
       st.setFilename(words[1]);
       gc = st;
     } else if (component === 'mission') {
-      gc = this.flow ? new MissionCard(words[1]) : new Mission(words[1]);
+      gc = new Mission(words[1]);
     } else if (component === 'blank') {
       const b = new Blank();
       const col = hexcolor(words[1]);
@@ -98,7 +87,6 @@ export class GameManager extends GameComponent {
     } else {
       throw new Error(`${err} invalid line`);
     }
-    if (this.flow && gc instanceof TitleCard) gc.holdForTap = true;
     this.addComponent(gc);
   }
 
@@ -145,10 +133,7 @@ export class GameManager extends GameComponent {
     const current = this.currentComponent();
     display.clearDepth();
     this.menu.read(input);
-    const tunerOpen = this.menu.tuner();
-    this.tuner?.setVisible(tunerOpen);
-    if (tunerOpen) current.play(display, 0, null);
-    else current.play(display, msecs, input);
+    current.play(display, msecs, input);
 
     const s = current.getStatus();
     // (Esc doesn't quit here: main.ts turns it into the pause menu.)
@@ -184,7 +169,7 @@ export class GameManager extends GameComponent {
   startAtMission(n: number): boolean {
     let target = -1;
     for (let i = 0, seen = 0; i < this.components.length; i++) {
-      if (this.components[i] instanceof Mission || this.components[i] instanceof MissionCard) {
+      if (this.components[i] instanceof Mission) {
         if (++seen === n) { target = i; break; }
       }
     }

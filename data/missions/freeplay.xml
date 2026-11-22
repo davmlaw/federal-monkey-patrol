@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<!-- Free play: the story's last mission with no goal and no clock.
+     Sixty kongs all round the plane wherever it flies (no patrol area or
+     radar), carrying blondes off up the towers and throwing bananas; save
+     and down as many as you like, until the last plane is lost. -->
+<mission>
+
+<startconditions>
+  <height>600</height>
+  <model>
+    <name>biplane.obj</name>
+    <skin>biplane_skin.jpg</skin>
+  </model>
+  <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.8">60</kongs>
+  <blondes grab_chance="1" max="4">on</blondes>
+  <patrolradius>none</patrolradius>
+  <radar>off</radar>
+  <!-- not too many: with sixty about, plenty are on screen at once -->
+  <bananas every_msecs="5000" rise_secs="2" range="1000" hit_radius="12">on</bananas>
+</startconditions>
+
+</mission>
