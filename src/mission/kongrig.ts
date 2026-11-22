@@ -583,3 +583,57 @@ export class KongAnimator extends RigAnimator<KongClip> {
     this.play(dt, clip, advance, phase, restart);
   }
 }
+
+/** A head for the HUD, rendered once with `renderer`: `model` (posed) lit
+ *  from the front, seen from `from` (a direction, from `centre`) framing a
+ *  ball of radius `r` round `centre`, on a clear background with a soft
+ *  shadow round it. A square canvas texture, flipY false. */
+export function renderPortrait(renderer: THREE.WebGLRenderer, model: THREE.Object3D, centre: THREE.Vector3, r: number, from: THREE.Vector3, size = 128): THREE.Texture {
+  const scene = new THREE.Scene();
+  const parent = model.parent;
+  scene.add(model);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.6));
+  const sun = new THREE.DirectionalLight(0xffffee, 2.6);
+  sun.position.copy(centre).add(new THREE.Vector3(-0.5, 1, 0).add(from.clone().normalize().multiplyScalar(1.5)));
+  sun.target.position.copy(centre);
+  scene.add(sun, sun.target);
+  scene.updateMatrixWorld(true);
+  const camera = new THREE.PerspectiveCamera(30, 1, r * 0.05, r * 50);
+  camera.position.copy(centre).add(from.clone().setLength(1.6 * r / Math.tan(THREE.MathUtils.degToRad(15))));
+  camera.lookAt(centre);
+  // render it, read it back
+  const px = size * 2;
+  const rt = new THREE.WebGLRenderTarget(px, px);
+  const prevTarget = renderer.getRenderTarget();
+  const prevColor = renderer.getClearColor(new THREE.Color());
+  const prevAlpha = renderer.getClearAlpha();
+  const pixels = new Uint8Array(px * px * 4);
+  try {
+    renderer.setRenderTarget(rt);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, true, true);
+    renderer.render(scene, camera);
+    renderer.readRenderTargetPixels(rt, 0, 0, px, px, pixels);
+  } finally {
+    renderer.setRenderTarget(prevTarget);
+    renderer.setClearColor(prevColor, prevAlpha);
+    rt.dispose();
+    if (parent) parent.add(model);
+    else scene.remove(model);
+  }
+  // (rows come back bottom up)
+  const raw = document.createElement('canvas');
+  raw.width = raw.height = px;
+  const img = raw.getContext('2d')!.createImageData(px, px);
+  for (let y = 0; y < px; y++) img.data.set(pixels.subarray((px - 1 - y) * px * 4, (px - y) * px * 4), y * px * 4);
+  raw.getContext('2d')!.putImageData(img, 0, 0);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  g.shadowColor = 'rgba(0, 0, 0, 0.85)';
+  g.shadowBlur = size * 0.06;
+  g.drawImage(raw, size * 0.06, size * 0.06, size * 0.88, size * 0.88);
+  const t = new THREE.CanvasTexture(c);
+  t.flipY = false;
+  return t;
+}

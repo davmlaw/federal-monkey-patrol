@@ -11,7 +11,7 @@ import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, IconTally, KissPop, KongPointer, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
+import { Banner, BlondeFinder, ClawAlert, CountDownTimer, FogPlane, IconTally, KissPop, KongPointer, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 import { Finale } from './finale.ts';
@@ -34,6 +34,8 @@ const RADAR_SIZE = 0.2;
 // With a fixed number of kongs to find, an arrow under the tally points to
 // the nearest when it's within game.properties' pointer_range.
 const POINTER_SIZE = 0.05;
+// Each falling blonde is pointed out by her head and "!" this high (ortho units).
+const FINDER_SIZE = 0.05;
 // After losing a plane for flying out of bounds: this long a message shows.
 const OUT_MESSAGE_MSECS = 3000;
 // With no patrol area, the kongs' area is centred this far (in radii) ahead
@@ -149,6 +151,8 @@ export class Mission extends GameComponent {
   private pointerRange = 1200;
   /** Blondes caught, under the kongs (when there are blondes). */
   private blondeTally: IconTally | null = null;
+  /** Points out each falling blonde (when there are blondes). */
+  private finder: BlondeFinder | null = null;
   /** An outcome has ended the mission: the status to take when the banner
    *  has shown for ENDING_MSECS. */
   private ending: { status: Status; msecs: number } | null = null;
@@ -221,10 +225,11 @@ export class Mission extends GameComponent {
     this.tally.position.y = this.livesDisplay.position.y - this.livesDisplay.getHeight() / 2 - 0.01 - this.tally.getHeight() / 2;
     if (this.kongs.blondes) {
       this.kongs.blondes.plane = this.player.entity;
-      this.blondeTally = new IconTally(blondeIconTexture(), 0.22);
+      this.blondeTally = new IconTally(this.kongs.blondes.portrait(theDisplay.renderer), 0.22);
       this.hud.add(this.blondeTally, TOP | LEFT);
       this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.005;
       this.blondeTally.setColor(1, 0.95, 0.7);
+      this.finder = new BlondeFinder(FINDER_SIZE);
     }
     if (!this.kongs.respawns) {
       this.pointerRange = settings.getf('game', 'pointer_range') || 1200;
@@ -496,7 +501,9 @@ export class Mission extends GameComponent {
     this.world!.draw(display, this.cameraman.getCamera());
     this.updateRadar(msecs);
     this.updatePointer(msecs);
+    this.updateFinder(msecs);
     display.draw2d(this.hud);
+    if (this.finder?.targets.length) display.draw2d(this.finder);
     if (this.outside > 0 && !this.heading && !this.player.entity.crashed) {
       this.turnBack.update(msecs);
       display.draw2d(this.turnBack);
@@ -567,6 +574,32 @@ export class Mission extends GameComponent {
       y = y / n * ORTHO_W;
     }
     this.pointer.dir = { x: x - this.pointer.position.x, y: y - this.pointer.position.y };
+  }
+
+  /** Where each falling blonde is on the screen, or the way she lies off
+   *  it, for the finder. */
+  private updateFinder(msecs: number): void {
+    const finder = this.finder;
+    const kit = this.kongs?.blondes;
+    if (!finder || !kit) return;
+    finder.update(msecs);
+    finder.targets = [];
+    if (this.player.entity.crashed || this.ending) return;
+    const camera = this.world!.camera;
+    camera.updateMatrixWorld();
+    for (const b of kit.falling()) {
+      // her head, in camera space (as the world was just drawn)
+      const v = b.object.position.clone().setY(b.object.position.y + kit.cfg.height * 0.5).applyMatrix4(camera.matrixWorldInverse);
+      if (v.z < 0) {
+        const ndc = v.clone().applyMatrix4(camera.projectionMatrix);
+        const onScreen = Math.abs(ndc.x) < 1 && Math.abs(ndc.y) < 1;
+        finder.targets.push({ x: ndc.x * ORTHO_W / 2, y: ndc.y * ORTHO_H / 2, onScreen });
+      } else {
+        // behind: which side she's off to (straight behind: down, as if past the plane)
+        const tiny = Math.abs(v.x) + Math.abs(v.y) < 1e-3;
+        finder.targets.push({ x: tiny ? 0 : v.x, y: tiny ? -1 : v.y, onScreen: false });
+      }
+    }
   }
 
   override dispose(): void {

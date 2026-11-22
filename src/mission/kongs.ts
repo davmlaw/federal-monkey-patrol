@@ -9,7 +9,7 @@ import { settings } from '../core/settings.ts';
 import { gamestats, Stat } from './stats.ts';
 import { BLOCKSIZE, type Box, type Hit } from './city.ts';
 import { Entity, type World } from './world.ts';
-import { FALL_SETTLE, GRAB_GOT, GRAB_SECONDS, KongAnimator, KongRig, type KongClip } from './kongrig.ts';
+import { FALL_SETTLE, GRAB_GOT, GRAB_SECONDS, KongAnimator, KongRig, renderPortrait, type KongClip } from './kongrig.ts';
 import { Blonde, BlondeKit, type Street } from './blonde.ts';
 
 interface KongConfig {
@@ -961,54 +961,13 @@ export class KongTroop {
     rig.mesh.rotation.y = Math.PI; // facing -Z
     const anim = new KongAnimator(rig);
     anim.update(0.5, 'idle');
-    const scene = new THREE.Scene();
-    scene.add(rig.mesh);
-    scene.add(new THREE.AmbientLight(0xffffff, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffee, 2.6);
-    sun.position.set(-0.5, 1, -1.5);
-    scene.add(sun, sun.target);
-    scene.updateMatrixWorld(true);
     const head = rig.bones.get('head')!.getWorldPosition(new THREE.Vector3());
     const neck = rig.bones.get('neck')!.getWorldPosition(new THREE.Vector3());
     const r = 300 * scale; // its radius, about
     // the face: the jaw hangs below the head bone's joint
     const centre = head.clone().addScaledVector(head.clone().sub(neck).normalize(), -0.55 * r);
-    const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 10);
-    camera.position.copy(centre).add(new THREE.Vector3(0.25, 0.1, -1).setLength(1.6 * r / Math.tan(THREE.MathUtils.degToRad(15))));
-    camera.lookAt(centre);
-    // render it, read it back
-    const px = size * 2;
-    const rt = new THREE.WebGLRenderTarget(px, px);
-    const prevTarget = renderer.getRenderTarget();
-    const prevColor = renderer.getClearColor(new THREE.Color());
-    const prevAlpha = renderer.getClearAlpha();
-    const pixels = new Uint8Array(px * px * 4);
-    try {
-      renderer.setRenderTarget(rt);
-      renderer.setClearColor(0x000000, 0);
-      renderer.clear(true, true, true);
-      renderer.render(scene, camera);
-      renderer.readRenderTargetPixels(rt, 0, 0, px, px, pixels);
-    } finally {
-      renderer.setRenderTarget(prevTarget);
-      renderer.setClearColor(prevColor, prevAlpha);
-      rt.dispose();
-      material.dispose();
-    }
-    // (rows come back bottom up)
-    const raw = document.createElement('canvas');
-    raw.width = raw.height = px;
-    const img = raw.getContext('2d')!.createImageData(px, px);
-    for (let y = 0; y < px; y++) img.data.set(pixels.subarray((px - 1 - y) * px * 4, (px - y) * px * 4), y * px * 4);
-    raw.getContext('2d')!.putImageData(img, 0, 0);
-    const c = document.createElement('canvas');
-    c.width = c.height = size;
-    const g = c.getContext('2d')!;
-    g.shadowColor = 'rgba(0, 0, 0, 0.85)';
-    g.shadowBlur = size * 0.06;
-    g.drawImage(raw, size * 0.06, size * 0.06, size * 0.88, size * 0.88);
-    const t = new THREE.CanvasTexture(c);
-    t.flipY = false;
+    const t = renderPortrait(renderer, rig.mesh, centre, r, new THREE.Vector3(0.25, 0.1, -1), size);
+    material.dispose();
     return t;
   }
 

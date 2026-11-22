@@ -317,6 +317,93 @@ export class KongPointer extends Drawable2D {
   }
 }
 
+/** A falling blonde for BlondeFinder: where she is on the screen (ortho
+ *  units, centred), or (`onScreen` false) the way she lies off it. */
+export interface FinderTarget { x: number; y: number; onScreen: boolean }
+
+/** The finder's icon: her head (as on the radar) and a red "!". */
+function finderTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 96;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  drawBlondeHead(g, 34, 34, 15);
+  g.font = 'bold 52px Georgia, serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  g.lineWidth = 6;
+  g.strokeStyle = '#2a0808';
+  g.strokeText('!', 78, 35);
+  g.fillStyle = '#ff3b2a';
+  g.fillText('!', 78, 35);
+  const t = new THREE.CanvasTexture(c);
+  t.flipY = false;
+  return t;
+}
+
+/**
+ * Each falling blonde, always: on screen, her head and "!" over her with a
+ * chevron pointing down at her; off it, on the edge of the screen the way
+ * she lies, with an arrow pointing out to her. They pulse.
+ */
+export class BlondeFinder extends Drawable2D {
+  targets: FinderTarget[] = [];
+  private clock = 0;
+  private icon = finderTexture();
+
+  /** `size`: the icon's height. */
+  constructor(private iconSize: number) {
+    super(ORTHO_W, ORTHO_H);
+  }
+
+  update(msecs: number): void { this.clock += msecs; }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    const h = this.iconSize * (1 + 0.12 * Math.sin(this.clock / 110));
+    const w = h * 1.5;
+    const ink: Color = [0.16, 0.11, 0.03, 0.9 * alpha];
+    const gold: Color = [0.95, 0.76, 0.19, alpha];
+    for (const t of this.targets) {
+      let ix: number;
+      let iy: number;
+      if (t.onScreen) {
+        // over her, a chevron pointing down at her
+        const bob = Math.abs(Math.sin(this.clock / 220)) * this.iconSize * 0.25;
+        const tip: Point = [t.x, t.y + this.iconSize * 0.4 + bob];
+        const s = this.iconSize * 0.3;
+        const chevron: Point[] = [[tip[0] - s, tip[1] + s], tip, [tip[0] + s, tip[1] + s]];
+        g.polyline(chevron, 0.009, ink);
+        g.polyline(chevron, 0.005, [1, 1, 1, alpha]);
+        ix = t.x;
+        iy = tip[1] + s + h * 0.6;
+      } else {
+        // on the edge of the screen, the way she is
+        const len = Math.hypot(t.x, t.y) || 1;
+        const ux = t.x / len;
+        const uy = len > 1e-6 ? t.y / len : -1;
+        const m = this.iconSize * 1.5;
+        const hw = ORTHO_W / 2 - m;
+        const hh = ORTHO_H / 2 - m;
+        const k = Math.min(Math.abs(ux) > 1e-6 ? hw / Math.abs(ux) : Infinity, Math.abs(uy) > 1e-6 ? hh / Math.abs(uy) : Infinity);
+        ix = ux * k;
+        iy = uy * k;
+        // an arrow beyond the icon, pointing out to her
+        const nudge = Math.sin(this.clock / 130) * this.iconSize * 0.12;
+        const at = (a: number, sd: number): Point => [ix + ux * (a + nudge) - uy * sd, iy + uy * (a + nudge) + ux * sd];
+        const r = this.iconSize;
+        const head = [at(r * 1.35, 0), at(r * 0.85, -r * 0.4), at(r * 0.85, r * 0.4)];
+        g.triangles(head, gold);
+        g.polyline(head, 0.003, ink, true);
+      }
+      g.push();
+      g.translate(ix, iy);
+      g.quad(w, h, [1, 1, 1, alpha], this.icon);
+      g.pop();
+    }
+  }
+}
+
 /** A HUD count as an icon and "x3" (and an optional word after). */
 export class IconTally extends Drawable2D {
   private line: Text2D;

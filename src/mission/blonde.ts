@@ -10,7 +10,7 @@ import { settings } from '../core/settings.ts';
 import { gamestats, Stat } from './stats.ts';
 import { Entity, type World } from './world.ts';
 import { drawBlondeHead } from './hud.ts';
-import { euler, mirror, Rig, RigAnimator, type BoneDef } from './kongrig.ts';
+import { euler, mirror, renderPortrait, Rig, RigAnimator, type BoneDef } from './kongrig.ts';
 
 // ------------------------------------------------------------------ rig
 
@@ -39,6 +39,9 @@ const DEFS: BoneDef[] = [...BODY, ...LEFT, ...LEFT.map(mirror)];
 export const BLONDE_GROUND_Y = -2845;
 export const BLONDE_WAIST_Y = -650;
 const BLONDE_HEIGHT = 3550;
+// her head for the HUD (model units): its middle, and how far round it to show
+const PORTRAIT_CENTRE: [number, number, number] = [0, 520, 60];
+const PORTRAIT_RADIUS = 230;
 
 export type BlondeClip = 'bind' | 'stand' | 'held' | 'fall' | 'landed';
 export const BLONDE_CLIPS: BlondeClip[] = ['bind', 'stand', 'held', 'fall', 'landed'];
@@ -174,7 +177,6 @@ function loadConfig(): BlondeConfig {
 const GRAVITY = 200; // until her dress catches the air (fall_speed)
 const CATCH_MSECS = 350; // whisked into the plane
 const HEARING = 2500;
-const BLINK_MSECS = 300; // the marker over her as she falls
 const THROW_SPEED = 45; // thrown clear of a roof by a kong shot up there
 // ...and steered out to the middle of the street, at up to this speed
 // across it, so she comes down where the plane can catch her
@@ -190,9 +192,10 @@ export interface Street { axis: 'x' | 'z'; at: number }
 
 type State = 'held' | 'falling' | 'caught' | 'landed';
 
-/** A marker over a blonde, so she's easy to find (carried off, or blinking
- *  as she falls): a chevron pointing down at her and her head (the same
- *  icon as on the radar), the same size on screen at any distance. */
+/** A marker over a blonde, so she's easy to find while she's carried off
+ *  (once she's falling, the mission's BlondeFinder points her out): a
+ *  chevron pointing down at her and her head (the same icon as on the
+ *  radar), the same size on screen at any distance. */
 function markerTexture(): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = 64;
@@ -327,7 +330,7 @@ export class Blonde extends Entity {
         pos.y += this.velocity.y * dt;
         this.spin += 0.5 * dt;
         this.object.rotation.set(0.12 * Math.sin(this.clock * 1.2), this.spin, 0.12 * Math.sin(this.clock * 0.9));
-        this.marker.visible = Math.floor(this.stateMsecs / BLINK_MSECS) % 3 !== 2;
+        this.marker.visible = false;
         // caught?
         const plane = this.kit.plane;
         // (anywhere along the plane's path this frame: it's fast)
@@ -427,6 +430,19 @@ export class BlondeKit {
     this.blondes.push(b);
     world.addEntity(b);
     return b;
+  }
+
+  /** Her head, rendered once with `renderer` (for the HUD's tally), as
+   *  KongTroop.portrait() does the kong's. */
+  portrait(renderer: THREE.WebGLRenderer, size = 128): THREE.Texture {
+    const rig = new BlondeRig(this.proto.geometry, this.proto.material);
+    const scale = 1 / BLONDE_HEIGHT;
+    rig.mesh.scale.setScalar(scale);
+    rig.apply('stand', 0);
+    rig.mesh.updateMatrixWorld(true);
+    // (the model faces +Z) her face and hair, round the middle of her head
+    const centre = new THREE.Vector3(...PORTRAIT_CENTRE).multiplyScalar(scale);
+    return renderPortrait(renderer, rig.mesh, centre, PORTRAIT_RADIUS * scale, new THREE.Vector3(0.3, 0.1, 1), size);
   }
 
   /** Falling now (for the radar). */

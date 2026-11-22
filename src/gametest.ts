@@ -45,6 +45,7 @@ interface MissionInternals {
   finale: { msecs: number; camera: { position: THREE.Vector3 }; kong: Kong } | null;
   pointer: { dir: { x: number; y: number } | null; behind: boolean } | null;
   pointerRange: number;
+  finder: { targets: { x: number; y: number; onScreen: boolean }[] } | null;
   player: { turnTo(yaw: number, invulnerable: number): void };
 }
 interface KongInternals {
@@ -379,6 +380,19 @@ const SCENARIOS: Record<string, Scenario> = {
     h.run(1500, { each: park });
     h.look('falling', blonde.object.position, 60);
     h.frame('falling (her head on the radar)');
+    // the finder: over her in front of the plane, on the edge of the
+    // screen when she's off to the side or behind
+    const finder = h.internals.finder;
+    for (const [label, turn] of [['ahead', 0], ['to the left', -Math.PI / 2], ['behind', Math.PI]] as const) {
+      const p = blonde.object.position;
+      // south of her, heading north (towards her), then turned
+      h.plane.object.position.set(p.x, p.y + 40, p.z + 450);
+      h.plane.object.quaternion.setFromEuler(new THREE.Euler(0, turn, 0, 'YXZ'));
+      h.frame(`falling, she's ${label}: the finder`, 12);
+      const t = finder?.targets ?? [];
+      h.check(t.length === 1 && t[0].onScreen === (turn === 0), `the finder shows her ${label} (${t.length} target, ${t[0]?.onScreen ? 'on screen' : 'off it'})`);
+    }
+    h.plane.object.quaternion.identity();
     if (params.has('catch')) {
       h.run(240000, { each: park, until: () => blonde.object.position.y < from.y - 150 || blonde.state !== 'falling' });
       h.log(`she is ${blonde.state} at y=${blonde.object.position.y.toFixed(0)} (from ${from.y.toFixed(0)})`);
@@ -398,15 +412,17 @@ const SCENARIOS: Record<string, Scenario> = {
     }
   },
 
-  /** The HUD's icons, large: the kong's head (rendered from the model),
-   *  the blonde's, and the kisses for catching her. */
+  /** The HUD's icons, large: the kong's head and (in a mission with
+   *  blondes, e.g. mission=saveblondes.xml) the blonde's (rendered from the
+   *  models), her radar icon, and the kisses for catching her. */
   icons(h) {
     const kongs = h.mission.kongs;
     if (!kongs) throw new Error('no kongs in this mission');
     const kiss = new KissPop() as unknown as { textures: Record<string, THREE.Texture> };
     const show: [string, THREE.Texture][] = [
       ['kong', kongs.portrait(display.renderer, 256)],
-      ['blonde', blondeIconTexture()],
+      ...(kongs.blondes ? [['blonde', kongs.blondes.portrait(display.renderer, 256)] as [string, THREE.Texture]] : []),
+      ['blonde (radar)', blondeIconTexture()],
       ...Object.entries(kiss.textures),
     ];
     for (const [label, t] of show) {
