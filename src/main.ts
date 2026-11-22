@@ -126,7 +126,7 @@ function showMenu({ ended = false } = {}): void {
   const chosen = params.get('game');
   const chosenMission = parseInt(params.get('mission') ?? '', 10) || 0;
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
-  const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
+  const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006 (converted to web and extended in 2026)'
     : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
     : 'The End.';
   const link = (g: (typeof GAMES)[number]): string => `
