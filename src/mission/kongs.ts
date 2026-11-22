@@ -111,6 +111,9 @@ type Task =
   | { kind: 'grab'; msecs: number } // reaches in at a window for a blonde
   | { kind: 'keep' }; // up on the roof: with a blonde, stays there for good
 
+/** The part of a kong that can be hit: within `r` of the segment a-b. */
+interface Capsule { a: THREE.Vector3; b: THREE.Vector3; r: number }
+
 /** A wall face: outward normal (nx, nz) and the face at nx*x + nz*z = d. */
 interface Wall { nx: number; nz: number; d: number }
 
@@ -132,6 +135,9 @@ const CORPSE_MSECS = 12000; // lies there this long...
 const SINK_MSECS = 3000; // ...then sinks into the street
 const HEARING = 3500; // roars fade out at this distance from the plane
 const CLIMB_OFF = 0.22; // stands this far (in heights) out from a wall to climb it
+// The whole of a kong, whatever it's doing, is within this many heights of
+// its feet (object.position; its middle, when it's tumbling).
+const BOUND = 1.3;
 const TURN_STEP = 0.2; // turning on the spot, the feet step as if walking this far (in heights) per radian
 
 export class Kong extends Entity {
@@ -176,6 +182,8 @@ export class Kong extends Entity {
   /** The one in its fist. */
   blonde: Blonde | null = null;
   private fist = new THREE.Vector3();
+  /** The hit capsule, worked out at most once a frame (see capsule()). */
+  private cap: Capsule | null = null;
 
   constructor(
     private pose: THREE.Group, // topples, pivoting at the feet
@@ -190,6 +198,8 @@ export class Kong extends Entity {
     super(object);
     this.shootable = true;
     this.health = Math.round(rand(cfg.healthMin, cfg.healthMax));
+    // posed when it's drawn (see _update)
+    anim.rig.mesh.onBeforeRender = () => anim.poseForRender();
   }
 
   get height(): number { return this.cfg.height; }
@@ -202,6 +212,7 @@ export class Kong extends Entity {
     this.tasks = [];
     this.wall = null;
     this.lastDir = null;
+    this.cap = null;
   }
 
   isDying(): boolean { return this.dying; }
@@ -229,17 +240,36 @@ export class Kong extends Entity {
   /** The hit capsule, in world space: an axis from below the hips to the
    *  neck (following the body as it climbs and falls), and a radius that
    *  takes in most of the arms. */
-  private capsule(): { a: THREE.Vector3; b: THREE.Vector3; r: number } {
+  private capsule(): Capsule {
+    if (this.cap) return this.cap;
     const h = this.cfg.height;
     this.object.updateMatrixWorld(true);
     const bones = this.anim.rig.bones;
-    const a = bones.get('hips')!.getWorldPosition(new THREE.Vector3());
-    const b = bones.get('neck')!.getWorldPosition(new THREE.Vector3());
+    const a = new THREE.Vector3().setFromMatrixPosition(bones.get('hips')!.matrixWorld);
+    const b = new THREE.Vector3().setFromMatrixPosition(bones.get('neck')!.matrixWorld);
     a.add(a.clone().sub(b).setLength(0.15 * h));
-    return { a, b, r: 0.2 * h };
+    return this.cap = { a, b, r: 0.2 * h };
+  }
+
+  /** Whether anything within `radius` of the segment p0-p1 could touch
+   *  it at all: a quick test against a ball round the whole kong. */
+  private near(p0: THREE.Vector3, p1: THREE.Vector3, radius: number): boolean {
+    const h = this.cfg.height;
+    const c = this.object.position;
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const dz = p1.z - p0.z;
+    const cx = c.x - p0.x;
+    const cy = c.y - p0.y;
+    const cz = c.z - p0.z;
+    const len2 = dx * dx + dy * dy + dz * dz;
+    const t = len2 > 1e-12 ? Math.max(0, Math.min(1, (cx * dx + cy * dy + cz * dz) / len2)) : 0;
+    const reach = BOUND * h + radius;
+    return (cx - dx * t) ** 2 + (cy - dy * t) ** 2 + (cz - dz * t) ** 2 <= reach * reach;
   }
 
   override intersect(p0: THREE.Vector3, p1: THREE.Vector3, radius: number): Hit | null {
+    if (!this.near(p0, p1, radius)) return null;
     const { a, b, r } = this.capsule();
     const reach = r + radius;
     const { s, d2 } = closestSegments(p0, p1, a, b);
@@ -257,7 +287,7 @@ export class Kong extends Entity {
   override aim(): { point: THREE.Vector3; radius: number } | null {
     if (this.dying) return null;
     const { a, b, r } = this.capsule();
-    return { point: a.lerp(b, 0.5), radius: r };
+    return { point: a.clone().lerp(b, 0.5), radius: r };
   }
 
   override struck(world: World, hit: Hit, velocity: THREE.Vector3, damage: number): void {
@@ -454,6 +484,7 @@ export class Kong extends Entity {
   // ------------------------------------------------------------ behaviour
 
   protected override _update(world: World, msecs: number): void {
+    this.cap = null; // (it's about to move)
     this.flash = Math.max(0, this.flash - msecs);
     const k = this.flash / FLASH_MSECS;
     this.material.emissive.setRGB(0.7 * k, 0.25 * k, 0.15 * k);
@@ -559,7 +590,10 @@ export class Kong extends Entity {
       clip = 'walk';
       travel = turned * TURN_STEP * this.cfg.height;
     }
-    this.anim.update(dt, clip, travel / this.scale);
+    // Posing is the costly part, and most kongs are out of sight: it's left
+    // until one is drawn (but one holding a blonde is posed now, to put her
+    // in its fist).
+    this.anim.update(dt, clip, travel / this.scale, undefined, !this.blonde);
     if (this.blonde) this.carry(clip);
   }
 

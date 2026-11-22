@@ -114,11 +114,9 @@ export class Harness {
   /** A picture of the world from `eye` looking at `at` (no HUD). */
   snap(label: string, eye: THREE.Vector3, at: THREE.Vector3, width = 320): void {
     const cam = { getPosition: () => eye, getTarget: () => at, up: new THREE.Vector3(0, 1, 0) };
-    // (twice: the first lets the city catch up round the camera)
-    for (let i = 0; i < 2; i++) {
-      display.beginFrame();
-      this.world.draw(display, cam as unknown as Parameters<World['draw']>[1]);
-    }
+    this.world.grid.settle(eye); // (the city round the camera, at once)
+    display.beginFrame();
+    this.world.draw(display, cam as unknown as Parameters<World['draw']>[1]);
     this.addImage(`${label} @${this.when}`, width);
   }
 
@@ -168,6 +166,7 @@ const SCENARIOS: Record<string, Scenario> = {
     const frames = Math.round(num('secs', 20) * 30);
     const update: number[] = [];
     const draw: number[] = [];
+    const slow: string[] = [];
     let calls = 0;
     let triangles = 0;
     let maxCalls = 0;
@@ -183,6 +182,7 @@ const SCENARIOS: Record<string, Scenario> = {
       h.t += 33;
       update.push(t1 - t0);
       draw.push(t2 - t1);
+      if (t2 - t1 > 12) slow.push(`${i}:${(t2 - t1).toFixed(0)}`);
       calls += renderer.info.render.calls;
       maxCalls = Math.max(maxCalls, renderer.info.render.calls);
       triangles += renderer.info.render.triangles;
@@ -199,6 +199,7 @@ const SCENARIOS: Record<string, Scenario> = {
     h.log(`update: ${stats(update)}`);
     h.log(`draw${finish ? ' (to the GPU finishing)' : ''}: ${stats(draw)}`);
     h.log(`draw calls: ${(calls / frames).toFixed(0)} a frame (most ${maxCalls}); triangles: ${(triangles / frames / 1000).toFixed(0)}k a frame`);
+    h.log(`slow draws (frame:ms over 12): ${slow.join(' ') || 'none'}`);
     h.log(`memory: ${renderer.info.memory.geometries} geometries, ${renderer.info.memory.textures} textures`);
   },
 

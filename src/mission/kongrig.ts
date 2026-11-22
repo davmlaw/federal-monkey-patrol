@@ -524,37 +524,80 @@ export class KongRig extends Rig {
 
 /**
  * Plays a rig's clips: advances the phase and blends from the old pose
- * when the clip changes.
+ * when the clip changes. play() poses the bones there and then; advance()
+ * only moves the clip on and leaves the posing (the costly part) to
+ * pose(), so something that's animated but not drawn needn't be posed at
+ * all (see poseForRender()).
  */
 export class RigAnimator<C extends string> {
   phase = 0;
   private from: { q: THREE.Quaternion[]; hips: THREE.Vector3 } | null = null;
   private blend = 1;
+  /** advance() has moved on from what the bones show. */
+  private dirty = true;
   private readonly bones: THREE.Bone[];
+  private readonly scratch = new THREE.Quaternion();
   static BLEND_SECS = 0.35;
 
   constructor(readonly rig: Rig, public clip: C) {
     this.bones = rig.boneNames.map((n) => rig.bones.get(n)!);
   }
 
-  /** Pose `clip`, with its phase moved on by `advance` (or set to `phase`);
-   *  `restart`: a new clip starts at phase 0. */
-  play(dt: number, clip: C, advance: number, phase?: number, restart = false): void {
+  /** Move `clip`'s phase on by `advance` (or set it to `phase`), without
+   *  posing; `restart`: a new clip starts at phase 0. */
+  advance(dt: number, clip: C, advance: number, phase?: number, restart = false): void {
     if (clip !== this.clip) {
-      this.from = { q: this.bones.map((b) => b.quaternion.clone()), hips: this.bones[0].position.clone() };
-      this.blend = 0;
+      if (this.dirty) {
+        // (never shown in the old pose: nothing to blend from)
+        this.from = null;
+        this.blend = 1;
+      } else {
+        this.from = { q: this.bones.map((b) => b.quaternion.clone()), hips: this.bones[0].position.clone() };
+        this.blend = 0;
+      }
       this.clip = clip;
       if (restart) this.phase = 0;
     }
     this.phase += advance;
     if (phase !== undefined) this.phase = phase;
-    this.rig.apply(clip, this.phase);
-    if (this.from && this.blend < 1) {
-      this.blend = Math.min(1, this.blend + dt / RigAnimator.BLEND_SECS);
-      const w = smooth(this.blend);
-      this.bones.forEach((b, i) => b.quaternion.slerpQuaternions(this.from!.q[i], b.quaternion.clone(), w));
-      this.bones[0].position.lerpVectors(this.from.hips, this.bones[0].position.clone(), w);
-    }
+    if (this.blend < 1) this.blend = Math.min(1, this.blend + dt / RigAnimator.BLEND_SECS);
+    this.dirty = true;
+  }
+
+  /** Pose the bones as advance() left things (if they aren't already). */
+  pose(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
+    this.rig.apply(this.clip, this.phase);
+    const from = this.from;
+    if (!from) return;
+    const w = smooth(this.blend);
+    this.bones.forEach((b, i) => b.quaternion.slerpQuaternions(from.q[i], this.scratch.copy(b.quaternion), w));
+    const hips = this.bones[0].position;
+    hips.set(
+      from.hips.x + (hips.x - from.hips.x) * w,
+      from.hips.y + (hips.y - from.hips.y) * w,
+      from.hips.z + (hips.z - from.hips.z) * w,
+    );
+    if (this.blend >= 1) this.from = null;
+  }
+
+  /** advance(), then pose(). */
+  play(dt: number, clip: C, advance: number, phase?: number, restart = false): void {
+    this.advance(dt, clip, advance, phase, restart);
+    this.pose();
+  }
+
+  /** Call from the mesh's onBeforeRender: poses it if advance() has left
+   *  it unposed, in time for this frame's draw (three has already worked
+   *  out the bones' matrices by then, so those are redone). So only
+   *  meshes that are actually drawn get posed. */
+  poseForRender(): void {
+    if (!this.dirty) return;
+    this.pose();
+    const mesh = this.rig.mesh;
+    mesh.updateMatrixWorld(true);
+    mesh.skeleton.update();
   }
 }
 
@@ -568,8 +611,9 @@ export class KongAnimator extends RigAnimator<KongClip> {
   }
 
   /** `travel`: model units moved forward (walking) or up (climbing) since
-   *  the last update. `phase`, if given, sets it outright (falling). */
-  update(dt: number, clip: KongClip, travel = 0, phase?: number): void {
+   *  the last update. `phase`, if given, sets it outright (falling).
+   *  `lazy`: don't pose now (see RigAnimator.poseForRender). */
+  update(dt: number, clip: KongClip, travel = 0, phase?: number, lazy = false): void {
     const advance = {
       walk: travel / WALK_STRIDE,
       climb: travel / CLIMB_STRIDE,
@@ -580,7 +624,8 @@ export class KongAnimator extends RigAnimator<KongClip> {
       fall: 0,
     }[clip];
     const restart = clip === 'roar' || clip === 'fall' || clip === 'grab';
-    this.play(dt, clip, advance, phase, restart);
+    if (lazy) this.advance(dt, clip, advance, phase, restart);
+    else this.play(dt, clip, advance, phase, restart);
   }
 }
 

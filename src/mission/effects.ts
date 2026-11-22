@@ -128,6 +128,7 @@ class ParticleLayer {
     mat.uniforms.map.value = map;
     this.points = new THREE.Points(g, mat);
     this.points.frustumCulled = false;
+    this.points.visible = false; // until it has particles
     this.points.renderOrder = additive ? 3 : 2; // after the city; fire over smoke
     // point sizes are in pixels: scale world sizes by the view's height
     this.points.onBeforeRender = (renderer, _scene, camera) => {
@@ -166,6 +167,8 @@ class ParticleLayer {
       for (let c = 0; c < 4; c++) rgba[i * 4 + c] = p.color0[c] + (p.color1[c] - p.color0[c]) * t;
     });
     const n = this.particles.length;
+    this.points.visible = n > 0; // (nothing to draw, most of the time)
+    if (!n) return;
     for (const a of [this.position, this.size, this.rgba]) {
       a.clearUpdateRanges();
       a.addUpdateRange(0, n * a.itemSize);

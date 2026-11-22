@@ -1085,14 +1085,14 @@ function buildFurniture(blocks: BlockData[], f: Furniture, cx: number, cz: numbe
 /** The full-detail version of a patch's buildings, with its street furniture. */
 interface PatchNear { group: THREE.Group; furniture: FurnitureQuarter[] }
 
-/** A patch of the grid: its data, its meshes, and the tallest roof per block. */
+/** A patch of the grid: its data and its meshes. */
 interface Patch {
+  key: string;
   group: THREE.Group;
   centre: Spot;
   data: PatchData;
-  tops: Map<string, number>;
-  /** The keys of this patch's blocks in CityGrid.solids. */
-  solidKeys: string[];
+  /** The keys of this patch's blocks in CityGrid.solids and .tops. */
+  blockKeys: string[];
   trees: THREE.Group;
   far: THREE.Group;
   near: PatchNear | null;
@@ -1132,17 +1132,28 @@ function buildPatchBase(data: PatchData, materials: CityMaterials): { group: THR
 }
 
 /** The near (full detail) version of a patch's buildings, with the street
- *  furniture. */
-function buildPatchNear(data: PatchData, materials: CityMaterials, cx: number, cz: number): PatchNear {
+ *  furniture. It's a lot of work (tens of milliseconds), so it comes as a
+ *  generator that yields between buildings, to be spread over several
+ *  frames (each building's styling is hashed from its position, so it
+ *  doesn't matter when they're built). */
+function* buildPatchNear(data: PatchData, materials: CityMaterials, cx: number, cz: number): Generator<void, PatchNear> {
   const group = new THREE.Group();
   const fb = new GeomBuilder();
   const trim = new GeomBuilder();
-  for (const b of data.buildings) addBuilding(fb, trim, b);
-  for (const s of data.skyscrapers) addSkyscraper(fb, trim, s);
+  for (const b of data.buildings) {
+    addBuilding(fb, trim, b);
+    yield;
+  }
+  for (const s of data.skyscrapers) {
+    addSkyscraper(fb, trim, s);
+    yield;
+  }
   const facades = fb.build({ layers: true });
   if (facades) group.add(new THREE.Mesh(facades, materials.facades));
+  yield;
   const t = trim.build({ colors: true });
   if (t) group.add(new THREE.Mesh(t, materials.trim));
+  yield;
   const furniture = buildFurniture(data.blocks, materials.furniture, cx, cz);
   for (const q of furniture) group.add(q.group);
   return { group, furniture };
@@ -1197,14 +1208,16 @@ function buildGround(materials: CityMaterials): THREE.Mesh {
 // - buildings: full detail (storefronts and lobbies, cornices, rooftop
 //   bulkheads and water tanks, metal crowns) nearer than NEAR_DISTANCE,
 //   otherwise the lite version (plain walls down to the street, a point for
-//   a crown). The full version is built when a patch first comes near, and
-//   thrown away again once it is NEAR_KEEP further out.
+//   a crown). The full version is built when a patch first comes near (a
+//   few milliseconds' work a frame, so the game doesn't stutter), and thrown
+//   away again once it is NEAR_KEEP further out.
 // - lamp posts and hydrants: full nearer than LAMP_DISTANCE, simple lamp
 //   posts only out to FURNITURE_DISTANCE, nothing beyond (or when the
 //   camera is higher than FURNITURE_MAX_HEIGHT).
 // - trees (cross trees, four triangles each): out to TREE_DISTANCE.
 const NEAR_DISTANCE = 2500;
 const NEAR_KEEP = 1500;
+const NEAR_BUDGET = 3; // msecs a frame spent building a patch's full version
 const LAMP_DISTANCE = 500;
 const FURNITURE_DISTANCE = 1800;
 const FURNITURE_MAX_HEIGHT = 2500;
@@ -1229,6 +1242,10 @@ export class CityGrid {
   /** Patches [i, j] still to generate, nearest first. */
   private queue: number[][] = [];
   private centre = { x: 0, z: 0 };
+  /** The patch being given full detail, a bit each frame (see update()). */
+  private upgrading: { patch: Patch; steps: Generator<void, PatchNear> } | null = null;
+  /** The tallest roof of each block, by block key (for maxHeightNear()). */
+  private tops = new Map<string, number>();
   /** Collision boxes by block key. */
   private solids = new Map<string, Box[]>();
 
@@ -1254,10 +1271,11 @@ export class CityGrid {
       solidKeys.add(k);
     }
     // tallest roof per block, for maxHeightNear()
-    const tops = new Map<string, number>();
+    const topKeys = new Set<string>();
     const note = (bx: number, bz: number, h: number): void => {
       const k = CityGrid.key(Math.floor(bx / BLOCKSIZE), Math.floor(bz / BLOCKSIZE));
-      tops.set(k, Math.max(tops.get(k) ?? 0, h));
+      this.tops.set(k, Math.max(this.tops.get(k) ?? 0, h));
+      topKeys.add(k);
     };
     for (const b of data.buildings) note(b.x, b.z, b.h + WS * 3);
     for (const sk of data.skyscrapers) {
@@ -1265,17 +1283,43 @@ export class CityGrid {
       for (let k = 0; k < sk.step.length; k += 2) h += sk.step[k] * sk.windowSize;
       note(sk.x, sk.z, h * 1.15 + sk.spire);
     }
-    const patch: Patch = { ...base, centre: { x, z }, data, tops, solidKeys: [...solidKeys], near: null };
+    const key = CityGrid.key(i, j);
+    const patch: Patch = { ...base, key, centre: { x, z }, data, blockKeys: [...new Set([...solidKeys, ...topKeys])], near: null };
     this.group.add(patch.group);
-    this.patches.set(CityGrid.key(i, j), patch);
+    this.patches.set(key, patch);
     return patch;
   }
 
-  /** Build the full-detail version of a patch. */
+  /** Build the full-detail version of a patch, all at once (while loading). */
   private addNear(patch: Patch): void {
     const { data, centre } = patch;
-    patch.near = buildPatchNear(data, this.materials, centre.x, centre.z);
+    const steps = buildPatchNear(data, this.materials, centre.x, centre.z);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    patch.near = step.value;
     patch.group.add(patch.near.group);
+  }
+
+  /** Carry on building the full-detail version of the patch being
+   *  upgraded, for about `budget` milliseconds. */
+  private stepUpgrade(budget: number): void {
+    const up = this.upgrading;
+    if (!up) return;
+    const until = performance.now() + budget;
+    do {
+      const step = up.steps.next();
+      if (step.done) {
+        this.upgrading = null;
+        // (the grid may have scrolled on and dropped the patch meanwhile)
+        if (this.patches.get(up.patch.key) === up.patch) {
+          up.patch.near = step.value;
+          up.patch.group.add(step.value.group);
+        } else {
+          disposeGroup(step.value.group, this.materials);
+        }
+        return;
+      }
+    } while (performance.now() < until);
   }
 
   private dropNear(patch: Patch): void {
@@ -1292,13 +1336,18 @@ export class CityGrid {
   async generate(onProgress: (fraction: number) => void): Promise<void> {
     const half = PATCHES / 2;
     let done = 0;
+    let shown = performance.now();
     for (let row = 0; row < PATCHES; row++) {
       for (let col = 0; col < PATCHES; col++) {
         const patch = this.addPatch(col - half, half - 1 - row);
         const { x, z } = patch.centre;
         if (boxDistance(0, 0, x, z, CHILD_LENGTH / 2) < NEAR_DISTANCE) this.addNear(patch);
         onProgress(++done / (PATCHES * PATCHES));
-        await new Promise((r) => requestAnimationFrame(r)); // let the load bar draw
+        // let the load bar draw, about once a frame's worth of work
+        if (performance.now() - shown > 12) {
+          await new Promise((r) => requestAnimationFrame(r));
+          shown = performance.now();
+        }
       }
     }
   }
@@ -1307,9 +1356,11 @@ export class CityGrid {
    * Follow the camera at `pos`: scroll the grid, hide patches entirely
    * beyond `visible` (the fog's far end, where they'd be drawn in the fog
    * colour anyway) and choose the level of detail (see above). At most one
-   * patch is generated, and one given full detail, per frame.
+   * patch is generated per frame, and one at a time is given full detail,
+   * `budget` milliseconds' work a frame. True while there was any to do.
    */
-  update(pos: THREE.Vector3, visible = Infinity): void {
+  update(pos: THREE.Vector3, visible = Infinity, budget = NEAR_BUDGET): boolean {
+    let busy = false;
     const cx = Math.round(pos.x / CHILD_LENGTH);
     const cz = Math.round(pos.z / CHILD_LENGTH);
     if (cx !== this.centre.x || cz !== this.centre.z) {
@@ -1324,7 +1375,10 @@ export class CityGrid {
         if (!wanted.has(k)) {
           this.group.remove(patch.group);
           disposeGroup(patch.group, this.materials);
-          for (const sk of patch.solidKeys) this.solids.delete(sk);
+          for (const bk of patch.blockKeys) {
+            this.solids.delete(bk);
+            this.tops.delete(bk);
+          }
           this.patches.delete(k);
         }
       }
@@ -1336,6 +1390,7 @@ export class CityGrid {
       this.queue.sort((a, b) => d(a) - d(b));
       const [i, j] = this.queue.shift()!;
       this.addPatch(i, j);
+      busy = true;
     }
     // Furniture is judged from a little above the street, so it goes when
     // the camera is high as well as far.
@@ -1365,7 +1420,17 @@ export class CityGrid {
         q.far.visible = !q.near.visible;
       }
     }
-    if (upgrade) this.addNear(upgrade);
+    if (upgrade && !this.upgrading) this.upgrading = { patch: upgrade, steps: buildPatchNear(upgrade.data, this.materials, upgrade.centre.x, upgrade.centre.z) };
+    busy ||= !!this.upgrading;
+    this.stepUpgrade(budget);
+    return busy;
+  }
+
+  /** Bring the city round `pos` fully up to date at once: every patch
+   *  generated and those near it in full detail (for the test harness's
+   *  snapshots, which can't wait a few frames as the game does). */
+  settle(pos: THREE.Vector3, visible = Infinity): void {
+    for (let i = 0; i < 200 && this.update(pos, visible, Infinity); i++);
   }
 
   /** The collision boxes of block (i, j), the block covering
@@ -1380,11 +1445,8 @@ export class CityGrid {
     const r = Math.ceil(radius / BLOCKSIZE);
     const bi = Math.floor(x / BLOCKSIZE);
     const bj = Math.floor(z / BLOCKSIZE);
-    for (const patch of this.patches.values()) {
-      const { tops } = patch;
-      for (let i = bi - r; i <= bi + r; i++) {
-        for (let j = bj - r; j <= bj + r; j++) h = Math.max(h, tops.get(CityGrid.key(i, j)) ?? 0);
-      }
+    for (let i = bi - r; i <= bi + r; i++) {
+      for (let j = bj - r; j <= bj + r; j++) h = Math.max(h, this.tops.get(CityGrid.key(i, j)) ?? 0);
     }
     return h;
   }
