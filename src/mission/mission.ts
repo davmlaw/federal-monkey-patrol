@@ -14,6 +14,8 @@ import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.t
 import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, IconTally, KissPop, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
+import { Finale } from './finale.ts';
+import { patchSeeThrough } from './seethrough.ts';
 
 // Top-down mode flies this far above the tallest building around the plane
 // (plus a kong's height, when they're on the roofs): high, so with the
@@ -24,7 +26,7 @@ const TOPDOWN_CLEARANCE = 380;
 const RESPAWN_MSECS = 2500;
 const RESPAWN_CLEARANCE = 120;
 const INVULNERABLE_MSECS = 3000;
-const GAME_OVER_MSECS = 4000; // the last crash, then "GAME OVER", then lost
+const WRECK_MSECS = 1500; // the last crash burns this long, then the game-over shot (finale.ts)
 // The radar reaches this far (world units); kongs further off sit on its rim.
 const RADAR_RANGE = 2400;
 const RADAR_SIZE = 0.2;
@@ -100,7 +102,8 @@ export class Mission extends GameComponent {
   private livesDisplay!: LivesDisplay;
   /** Counts down while the wreck burns (0: flying). */
   private crashTimer = 0;
-  private gameOver = new Text2D('GAME OVER', 0.6);
+  /** The game-over shot, once the last plane has crashed. */
+  private finale: Finale | null = null;
   /** The patrol area (game.properties patrol_radius, round the start). */
   private patrol: Area = { x: 0, z: 0, r: 3200 };
   private turnBackMsecs = 6000;
@@ -196,6 +199,7 @@ export class Mission extends GameComponent {
     const grid = new CityGrid(materials);
     await grid.generate((p: number) => { this.progress = p; });
     this.world = new World(grid);
+    patchSeeThrough(grid.group); // (for the game-over shot, compiled in now)
     this.world.addEntity(this.player.entity);
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
     this.tally = new IconTally(this.kongs.portrait(theDisplay.renderer), 0.22, this.kongs.respawns ? '' : 'LEFT');
@@ -293,7 +297,7 @@ export class Mission extends GameComponent {
     if (this.ending) {
       this.ending.msecs -= msecs;
       if (this.ending.msecs <= 0) this.setStatus(this.ending.status);
-    } else {
+    } else if (!this.finale) {
       gamestats.addGameTime(msecs); // (the clock stops at the end)
     }
     this.countdowntimer?.update(gamestats.get(Stat.GAME_SECONDS));
@@ -304,10 +308,10 @@ export class Mission extends GameComponent {
         if (this.lives > 0) {
           const pos = plane.object.position;
           this.player.respawn(world.grid.maxHeightNear(pos.x, pos.z) + RESPAWN_CLEARANCE, INVULNERABLE_MSECS);
-        } else if (!this.ending) {
-          lastResult.title = 'Game over';
-          lastResult.line = summary();
-          this.setStatus(Status.LOST);
+        } else if (!this.ending && !this.finale) {
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(plane.object.quaternion).setY(0);
+          const behind = fwd.lengthSq() > 1e-6 ? fwd.normalize().negate() : new THREE.Vector3(0, 0, 1);
+          this.finale = new Finale(world, this.kongs!, this.cameraman.getCamera(), behind);
         }
       }
     } else if (input) {
@@ -342,11 +346,22 @@ export class Mission extends GameComponent {
       // it just hit something
       this.lives--;
       this.livesDisplay.lives = this.lives;
-      this.crashTimer = this.lives > 0 ? RESPAWN_MSECS : GAME_OVER_MSECS;
+      this.crashTimer = this.lives > 0 ? RESPAWN_MSECS : WRECK_MSECS;
       this.outside = 0; // a fresh countdown after the respawn
       playBang();
     }
+    if (this.finale) {
+      this.finale.update(msecs);
+      if (this.finale.done && this.status === Status.PLAYING) {
+        lastResult.title = 'Game over';
+        lastResult.line = summary();
+        this.setStatus(Status.LOST);
+      }
+    }
   }
+
+  /** Playing the game-over shot (no HUD or flight controls). */
+  get cinematic(): boolean { return !!this.finale; }
 
   /** A kiss (a heart or lipstick) when a blonde is caught, "Missed her!"
    *  when one lands. */
@@ -418,6 +433,11 @@ export class Mission extends GameComponent {
   private draw(display: Display, msecs: number): void {
     display.draw2d(this.fogplane);
     display.clearDepth();
+    if (this.finale) {
+      this.world!.draw(display, this.finale.camera, this.finale.beforeRender);
+      this.finale.drawOverlay();
+      return;
+    }
     this.cameraman.lookAt(this.player.entity.object, this.player.mode, msecs, this.player.screenOffset());
     this.world!.draw(display, this.cameraman.getCamera());
     this.updateRadar(msecs);
@@ -430,7 +450,6 @@ export class Mission extends GameComponent {
     if (this.blondeMessageMsecs > 0 && !this.ending) display.draw2d(this.blondeMessage);
     if (this.kiss.showing) display.draw2d(this.kiss);
     if (this.ending) display.draw2d(this.banner);
-    else if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
     if (msecs) {
       this.fps.update(msecs);
       display.draw2d(fpsOverlay(this.fps));
@@ -451,6 +470,7 @@ export class Mission extends GameComponent {
   }
 
   override dispose(): void {
+    this.finale?.dispose();
     this.world?.dispose();
     this.world = null;
   }

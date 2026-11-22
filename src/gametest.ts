@@ -6,7 +6,8 @@
 //   npm run shoot -- 'gametest.html?scenario=blonde&catch=1'
 //
 // URL parameters:
-//   scenario=<name>   one of SCENARIOS below (default: hud)
+//   scenario=<name>   one of SCENARIOS below (default: hud): hud, kongs,
+//                     blonde, icons, kongfall, gameover
 //   mission=<file>    data/missions/<file> (default: claw.xml, Free Patrol)
 //   set=mod.key=value override a .properties setting before loading
 //                     (repeatable), e.g. set=kong.climb_chance=1
@@ -38,6 +39,9 @@ const num = (k: string, d: number): number => {
 interface MissionInternals {
   update(msecs: number, input: Input | null): void;
   patrol: Area;
+  lives: number;
+  crashTimer: number;
+  finale: { msecs: number; camera: { position: THREE.Vector3 }; kong: Kong } | null;
 }
 interface KongInternals {
   tasks: { kind: string; roar?: boolean }[];
@@ -294,6 +298,47 @@ const SCENARIOS: Record<string, Scenario> = {
       h.check(street < 45, `kong ${i}: in the street, not on a building`);
       h.look(`kong ${i}: down`, p.clone().setY(10), 3 * k.height, side, 2);
     }
+  },
+
+  /** The last plane crashes and the game-over shot plays: the camera flies
+   *  to a kong on a roof (one already up there, or, with roof=0 or none
+   *  about, a new one behind the plane) and closes in on it roaring. A
+   *  frame every `every` msecs (default 1000). roof=1 first waits for a
+   *  kong to be up on a roof (climbs made certain). */
+  gameover(h) {
+    const mi = h.internals;
+    if (params.get('roof') === '1') {
+      for (const k of h.kongs()) h.kong(k).cfg.climbChance = 1;
+      h.plane.charmed = true;
+      const start = h.plane.object.position.clone().setY(2500);
+      h.check(h.run(240000, { each: () => h.plane.object.position.copy(start), until: () => h.kongs().some((k) => k.onRoof()) }), 'a kong got up on a roof');
+      h.plane.charmed = false;
+      h.plane.object.position.copy(start).setY(400);
+      h.frame('flying', 3);
+    }
+    const p = h.plane.object.position;
+    h.plane.hit(h.world, { t: 0, point: p.clone(), normal: new THREE.Vector3(0, 1, 0) }, new THREE.Vector3());
+    // (as Mission.update does when it sees the crash)
+    mi.lives = 0;
+    mi.crashTimer = 1500;
+    h.frame('the last crash', 4);
+    const started = h.run(5000, { until: () => !!mi.finale });
+    h.check(started && !!mi.finale, 'the game-over shot starts after the wreck burns');
+    const fin = mi.finale;
+    if (!fin) return;
+    const kong = fin.kong;
+    const kp = kong.object.position;
+    h.log(`kong at ${kp.x.toFixed(0)},${kp.y.toFixed(0)},${kp.z.toFixed(0)}, ${p.distanceTo(kp).toFixed(0)} from the wreck`);
+    h.check(kp.y > 100, 'the kong is up on a building');
+    const every = num('every', 1000);
+    const until = h.t + 60000;
+    while (h.mission.getStatus() === 0 && h.t < until) {
+      h.frame(`game over +${(fin.msecs / 1000).toFixed(1)}s`, Math.max(1, Math.round(every / 30)));
+    }
+    const d = fin.camera.position.distanceTo(kp.clone().setY(kp.y + kong.height * 0.6));
+    h.check(d < 3 * kong.height, `the camera ends close on it (${d.toFixed(0)} away)`);
+    h.check(h.kong(kong).tasks[0]?.roar === true, 'it is roaring');
+    h.check(h.mission.getStatus() === 2, 'and then the game is lost');
   },
 };
 

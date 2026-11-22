@@ -784,12 +784,14 @@ export class World {
     }
   }
 
-  draw(display: Display, smoothCamera: ChaseCamera): void {
+  /** `beforeRender` sees the camera once it's placed. */
+  draw(display: Display, smoothCamera: ChaseCamera, beforeRender?: (camera: THREE.PerspectiveCamera) => void): void {
     const pos = smoothCamera.getPosition();
     this.camera.position.copy(pos);
     this.camera.up.copy(smoothCamera.up);
     this.camera.lookAt(smoothCamera.getTarget());
     this.grid.update(pos, FOG_END); // scroll the city with the camera
+    beforeRender?.(this.camera);
     display.render3d(this.scene, this.camera);
   }
 

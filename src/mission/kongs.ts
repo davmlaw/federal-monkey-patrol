@@ -196,6 +196,23 @@ export class Kong extends Entity {
 
   isDying(): boolean { return this.dying; }
 
+  /** Standing up on a roof (not on its way up or down a wall). */
+  onRoof(): boolean {
+    const kind = this.tasks[0]?.kind;
+    return !this.dying && this.object.position.y > 0.5 * this.cfg.height
+      && (this.perched || kind === 'wait' || kind === 'turn');
+  }
+
+  /** The game-over shot: turn to `yaw` (towards the camera) and beat its
+   *  chest and roar from here on, heard from `ear`. */
+  showOff(yaw: number, ear: THREE.Object3D): void {
+    this.perched = true;
+    this.ear = ear;
+    this.wall = null;
+    this.tasks = [{ kind: 'turn', yaw: this.yaw + angleTo(this.yaw, yaw) }];
+    for (let i = 0; i < 40; i++) this.tasks.push({ kind: 'wait', msecs: 4500, roar: true });
+  }
+
   // ------------------------------------------------------------- shooting
 
   /** The hit capsule, in world space: an axis from below the hips to the
@@ -761,6 +778,8 @@ const SPAWN_APART = 600;
 const TOWER_MIN = 1200;
 const TOWER_TOP = 0.1;
 const PERCH_APART = 0.65; // kongs sharing a tower top stand this many heights apart
+// The game-over shot finds a kong (or puts one) within this of the camera.
+const FINALE_REACH = 2400;
 
 /** A mission's say over its kongs (<kongs> in <startconditions>); anything
  *  left out comes from kong.properties. */
@@ -983,6 +1002,67 @@ export class KongTroop {
       }
     }
     return free.length ? free[Math.floor(Math.random() * free.length)] : null;
+  }
+
+  /** A kong for the game-over shot: one standing on a roof near `eye`
+   *  (the nearest), or, with none, a new one on a tall building nearby,
+   *  behind (`behind`: a unit vector on the ground) if there is one. */
+  finaleKong(world: World, eye: THREE.Vector3, behind: THREE.Vector3): Kong {
+    const near = (k: Kong): number => k.object.position.distanceTo(eye);
+    const up = this.living().filter((k) => k.onRoof() && near(k) < FINALE_REACH).sort((a, b) => near(a) - near(b));
+    if (up.length) return up[0];
+    const spot = this.finaleSpot(world, eye, behind);
+    const kong = this.make();
+    kong.home = this.area;
+    kong.kit = null;
+    kong.placeAt(spot[0], spot[2], 0, spot[1]);
+    kong.perched = true;
+    this.kongs.push(kong);
+    world.addEntity(kong);
+    return kong;
+  }
+
+  /** Somewhere for finaleKong() to put one: a skyscraper top, else any
+   *  tall flat roof, else a crossing; nearer `behind` the better. */
+  private finaleSpot(world: World, eye: THREE.Vector3, behind: THREE.Vector3): [number, number, number] {
+    const n = Math.ceil(FINALE_REACH / BLOCKSIZE);
+    const ci = Math.floor(eye.x / BLOCKSIZE);
+    const cj = Math.floor(eye.z / BLOCKSIZE);
+    const score = ([x, y, z]: [number, number, number]): number => {
+      const dx = x - eye.x;
+      const dz = z - eye.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 350 || d > FINALE_REACH) return -Infinity;
+      return (dx * behind.x + dz * behind.z) / d + y / 1500 - Math.abs(d - 1000) / 1500;
+    };
+    const best = (spots: [number, number, number][]): [number, number, number] | null => {
+      let pick: [number, number, number] | null = null;
+      let top = -Infinity;
+      for (const p of spots) {
+        const sc = score(p);
+        if (sc > top) { top = sc; pick = p; }
+      }
+      return pick;
+    };
+    const towers: [number, number, number][] = [];
+    const roofs: [number, number, number][] = [];
+    for (let i = ci - n; i <= ci + n; i++) {
+      for (let j = cj - n; j <= cj + n; j++) {
+        towers.push(...(this.towerSpots(world, i, j) ?? []));
+        for (const b of world.grid.blockBoxes(i, j)) {
+          if (b.y1 < 150 || b.x1 - b.x0 < 0.5 * this.cfg.height || b.z1 - b.z0 < 0.5 * this.cfg.height) continue;
+          const x = (b.x0 + b.x1) / 2;
+          const z = (b.z0 + b.z1) / 2;
+          const hit = world.grid.sweep(new THREE.Vector3(x, 5000, z), new THREE.Vector3(x, -10, z), 0);
+          if (hit && hit.normal.y > 0.9 && Math.abs(hit.point.y - b.y1) < 0.5) roofs.push([x, b.y1, z]);
+        }
+      }
+    }
+    const spot = best(towers) ?? best(roofs);
+    if (spot) return spot;
+    const x = Math.round((eye.x + behind.x * 800) / BLOCKSIZE) * BLOCKSIZE;
+    const z = Math.round((eye.z + behind.z * 800) / BLOCKSIZE) * BLOCKSIZE;
+    return [x, 0, z];
   }
 
   private spawn(world: World, player: THREE.Object3D): void {

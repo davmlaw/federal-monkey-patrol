@@ -1,32 +1,27 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
+<!-- The story's first mission: three kongs in the patrol area, and no more
+     coming. Shoot them all down. -->
 <mission>
 
 <startconditions>
-  <height>5000</height>
+  <height>600</height>
   <model>
     <name>biplane.obj</name>
     <skin>biplane_skin.jpg</skin>
   </model>
+  <kongs respawn_msecs="never">3</kongs>
 </startconditions>
-
-<constraints>
-  <maxheight>10000</maxheight>
-  <minheight>5000</minheight>
-  <maxspeed>100</maxspeed>
-  <minspeed>50</minspeed>
-</constraints>
 
 <outcomes>
   <scenario>
     <condition>
-      <stat name="monkey_deaths" op="gte"  value="5" />
+      <stat name="monkey_population" op="eq" value="0" />
     </condition>
     <result>
       <value>next</value>
-      <message>You are a hero, harlow!</message>
+      <message>Three kongs down. Nice shooting, Harlow!</message>
     </result>
   </scenario>
-
 </outcomes>
 
 </mission>

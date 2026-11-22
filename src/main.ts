@@ -31,7 +31,7 @@ const GAMES: { file: string; title: string; note: string; group: Group }[] = [
   { group: 'mode', file: 'rooftops.game', title: 'Rooftops', note: 'Top-down, 1942 style: kongs on every roof, the plane heads up the screen and slides side to side' },
   { group: 'mode', file: 'rooftops_steer.game', title: 'Rooftops: Steering', note: 'Top-down with kongs on every roof; left and right turn the plane' },
   { group: 'mode', file: 'fly.game', title: 'Free Patrol', note: 'Just fly: two kongs about at a time, and more keep coming' },
-  { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Film leader, intro and the four chapters (no missions in it yet)' },
+  { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story', note: 'Film leader, then the first mission (kill three kongs), the intro and the four chapters' },
   { group: 'extra', file: 'mission.game', title: 'Test mission', note: 'test.xml, with its countdown timer' },
   { group: 'extra', file: 'fade_test.game', title: 'Transitions', note: 'Demo of the transition effects' },
 ];
@@ -209,7 +209,7 @@ async function start(file: string | null): Promise<void> {
       if (paused) c?.play(display, 0, null); // frozen
       else g.play(display, msecs, input);
       // on-screen flight controls only while flying a mission
-      const player = c instanceof Mission && c.loaded && !c.loadError ? c.player : null;
+      const player = c instanceof Mission && c.loaded && !c.loadError && !c.cinematic ? c.player : null;
       tc.setVisible(!!player && !paused && !tuner?.visible);
       if (player) tc.showThrottle(player.mode === FlyMode.FOLLOW);
       stage.endFrame();

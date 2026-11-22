@@ -5,6 +5,7 @@ import { loadSound, playSound, type SoundHandle } from '../core/assets.ts';
 import type { Display } from '../core/display.ts';
 import type { Input } from '../core/input.ts';
 import { GameComponent, Status } from './component.ts';
+import { FilmGrain } from './film.ts';
 import { makeLayer, stage } from './stage.ts';
 
 const css = ([r, g, b]: readonly number[]): string => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
@@ -39,8 +40,12 @@ export class Picture extends GameComponent {
   private timeDisplayed = 0;
   private color = [1, 1, 1];
   private layer: HTMLDivElement = makeLayer('picture');
+  /** `film` on the line: grain, flicker and scratches over it. */
+  private film: FilmGrain | null = null;
 
   setFilename(f: string): void { this.filename = f; }
+
+  setFilm(on: boolean): void { this.film = on ? new FilmGrain() : null; }
 
   setTime(ms: number): void { this.showTime = ms; }
 
@@ -58,13 +63,58 @@ export class Picture extends GameComponent {
       tint.style.background = css(this.color);
       this.layer.append(tint);
     }
+    if (this.film) {
+      this.film = new FilmGrain({ weave: img });
+      this.layer.append(this.film.el);
+    }
   }
 
   protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
     this.timeDisplayed += msecs;
+    this.film?.update();
     stage.show(this.layer, alpha);
     if (this.timeDisplayed > this.showTime) this.status = Status.NEXT;
   }
+}
+
+/**
+ * `card <msecs> <text>`: a silent-film title card, white lettering in a
+ * border on black, with film grain over it. `|` breaks a line. It shows
+ * for `msecs`, and if the mission after it (`ahead`, set by the
+ * GameManager, which loads it early) is still generating its city, until
+ * that's ready, so the card covers the load bar.
+ */
+export class TitleCard extends GameComponent {
+  override isDom = true;
+  override status: Status = Status.PLAYING;
+  private shown = 0;
+  private card: Card;
+  ahead: GameComponent | null = null;
+
+  constructor(text: string, private msecs: number) {
+    super();
+    this.card = cardLayer(text);
+  }
+
+  protected override _play(_display: Display, msecs: number, _input: Input | null, alpha: number): void {
+    this.shown += msecs;
+    this.card.update();
+    stage.show(this.card.layer, alpha);
+    if (this.shown >= this.msecs && (!this.ahead || this.ahead.loaded)) this.status = Status.NEXT;
+  }
+}
+
+/** A title card's layer; update() it each frame it's shown (the film). */
+export interface Card { layer: HTMLDivElement; update(): void }
+
+/** A title card (see TitleCard) saying `text` (`|` breaks a line). */
+export function cardLayer(text: string): Card {
+  const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const lines = text.split('|').map((l) => `<span>${esc(l.trim())}</span>`).join('');
+  const layer = makeLayer('card', `<div class="frame"><div class="words">${lines}</div></div>`);
+  const film = new FilmGrain({ weave: layer.firstElementChild as HTMLElement });
+  layer.append(film.el);
+  return { layer, update: () => film.update() };
 }
 
 /**

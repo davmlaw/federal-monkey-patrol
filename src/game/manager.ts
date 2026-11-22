@@ -1,8 +1,9 @@
 // Plays the components of a .game file in sequence.
 //
 // A .game file lists components, one per line:
-//   blank <rrggbb> | picture <file> [msecs] [rrggbb] | storyteller <file.shot>
-//   mission <file.xml> | music <file> | transition <type> <msecs>
+//   blank <rrggbb> | picture <file> [msecs] [rrggbb] [film] | storyteller <file.shot>
+//   mission <file.xml> | music <file> | card <msecs> <text, | for a new line>
+//   transition <type> <msecs>
 // A transition links the component before it to the one after it.
 
 import { readLines } from '../core/assets.ts';
@@ -10,7 +11,7 @@ import type { Display } from '../core/display.ts';
 import { MenuFilter, type Input } from '../core/input.ts';
 import { hexcolor } from '../core/settings.ts';
 import { GameComponent, Status } from './component.ts';
-import { Blank, Picture, SoundTrack } from './simple.ts';
+import { Blank, Picture, SoundTrack, TitleCard } from './simple.ts';
 import { StoryTeller } from './storyteller.ts';
 import { makeTransition, Transition } from './transition.ts';
 import { Mission } from '../mission/mission.ts';
@@ -52,7 +53,7 @@ export class GameManager extends GameComponent {
   }
 
   handleLine(line: string): void {
-    const words = line.split(' ');
+    let words = line.split(' ');
     const err = `GameFileReader(${line}): `;
     if (words.length < 2) throw new Error(`${err} line too short`);
     const component = words[0];
@@ -75,8 +76,12 @@ export class GameManager extends GameComponent {
       const col = hexcolor(words[1]);
       if (col) b.setColor(col[0], col[1], col[2]);
       gc = b;
+    } else if (component === 'card') {
+      gc = new TitleCard(words.slice(2).join(' '), parseInt(words[1], 10) || 0);
     } else if (component === 'picture') {
       const p = new Picture();
+      p.setFilm(words.includes('film'));
+      words = words.filter((w) => w !== 'film');
       p.setFilename(words[1]);
       if (words.length >= 3) p.setTime(parseInt(words[2], 10) || 0);
       if (words.length >= 4) {
@@ -113,6 +118,16 @@ export class GameManager extends GameComponent {
   currentComponent(): GameComponent { return this.components[this.current]; }
 
   private prefetch(): void {
+    // a title card covers the city being generated for the mission after it
+    const cur = this.components[this.current];
+    if (cur instanceof TitleCard && !cur.ahead) {
+      const after = this.components.slice(this.current + 1, this.current + 3);
+      const m = after.find((c) => c instanceof Mission);
+      if (m && after.indexOf(m) === after.findIndex((c) => !(c instanceof Transition))) {
+        cur.ahead = m;
+        m.load();
+      }
+    }
     for (let i = this.current; i < Math.min(this.components.length, this.current + PREFETCH_AHEAD); i++) {
       const c = this.components[i];
       if (c instanceof Mission) break;
