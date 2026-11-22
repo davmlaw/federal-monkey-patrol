@@ -108,7 +108,8 @@ type Task =
   | { kind: 'climb'; y: number } // up or down a wall
   | { kind: 'wait'; msecs: number; roar: boolean }
   | { kind: 'wall'; wall: Wall | null } // gets on / off a wall
-  | { kind: 'grab'; msecs: number }; // reaches in at a window for a blonde
+  | { kind: 'grab'; msecs: number } // reaches in at a window for a blonde
+  | { kind: 'keep' }; // up on the roof: with a blonde, stays there for good
 
 /** A wall face: outward normal (nx, nz) and the face at nx*x + nz*z = d. */
 interface Wall { nx: number; nz: number; d: number }
@@ -141,6 +142,8 @@ export class Kong extends Entity {
   private health: number;
   private flash = 0;
   private roared = false;
+  /** Out for a blonde: walks on to a crossing with a skyscraper to climb. */
+  private hunting = false;
   // falling (after being shot down)
   private dying = false;
   private fallT = 0;
@@ -523,6 +526,16 @@ export class Kong extends Entity {
         this.wall = task.wall;
         done = true;
         break;
+      case 'keep':
+        if (this.blonde) {
+          // never back down with her: up here, turning about and roaring,
+          // until it's shot
+          this.perched = true;
+          this.tasks = [];
+          this.roared = false;
+        }
+        done = true;
+        break;
       case 'grab': {
         const got = GRAB_GOT * GRAB_SECONDS * 1000;
         const before = task.msecs;
@@ -537,7 +550,7 @@ export class Kong extends Entity {
         break;
       }
     }
-    if (done) {
+    if (done && this.tasks[0] === task) {
       this.tasks.shift();
       this.roared = false;
     }
@@ -589,7 +602,7 @@ export class Kong extends Entity {
     if (this.perched) {
       this.tasks.push(
         { kind: 'turn', yaw: this.yaw + rand(-2, 2) },
-        { kind: 'wait', msecs: rand(...PERCH_MSECS), roar: Math.random() < 0.3 },
+        { kind: 'wait', msecs: rand(...PERCH_MSECS), roar: Math.random() < (this.blonde ? 0.5 : 0.3) },
       );
       return;
     }
@@ -600,13 +613,18 @@ export class Kong extends Entity {
       this.tasks.push({ kind: 'walk', x, z }); // (to the crossing first)
       return;
     }
-    if (this.blonde && this.kit) {
-      // carrying one: up another tall one with her
-      if (Math.random() < this.kit.cfg.climbChance && this.planClimb(world, x, z, false)) return;
-    } else if (Math.random() < this.cfg.climbChance) {
-      const kidnap = !!this.kit && Math.random() < this.kit.cfg.grabChance && this.kit.canKidnap();
-      if (kidnap && this.planClimb(world, x, z, true)) return;
-      if (this.planClimb(world, x, z, false)) return;
+    if (this.hunting || Math.random() < this.cfg.climbChance) {
+      // out for a blonde: only up a skyscraper, walking on to find one
+      this.hunting = this.hunting || (!!this.kit && Math.random() < this.kit.cfg.grabChance);
+      if (this.hunting && this.kit?.canKidnap()) {
+        if (this.planClimb(world, x, z, true)) {
+          this.hunting = false;
+          return;
+        }
+      } else {
+        this.hunting = false;
+        if (this.planClimb(world, x, z, false)) return;
+      }
     }
     const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     let options = dirs.filter(([dx, dz]) => !this.lastDir || dx !== -this.lastDir[0] || dz !== -this.lastDir[1] || Math.random() < 0.05);
@@ -615,8 +633,14 @@ export class Kong extends Entity {
       // near the edge of the patrol area: only ways back in
       options = dirs.filter(([dx, dz]) => dx * (home.x - x) + dz * (home.z - z) > 0);
     }
+    if (this.hunting && this.kit) {
+      // towards the next crossing with a skyscraper on a corner, if any
+      const minTop = this.kit.cfg.minTop;
+      const tall = options.filter(([dx, dz]) => tallestAt(world, x + dx * BLOCKSIZE, z + dz * BLOCKSIZE) >= minTop);
+      if (tall.length) options = tall;
+    }
     const [dx, dz] = options[Math.floor(Math.random() * options.length)];
-    const blocks = Math.random() < 0.3 ? 2 : 1;
+    const blocks = this.hunting ? 1 : Math.random() < 0.3 ? 2 : 1;
     this.lastDir = [dx, dz];
     this.tasks.push({ kind: 'walk', x: x + dx * blocks * BLOCKSIZE, z: z + dz * blocks * BLOCKSIZE });
   }
@@ -629,7 +653,7 @@ export class Kong extends Entity {
    *  With a blonde, or to `grab` one, it wants a tall one instead, and
    *  climbs on up any setbacks above it to the top of the tower: grabbing
    *  her at a window a few storeys up on the way, staying longer on the
-   *  roof, then climbing back down with her.
+   *  roof, and staying up there with her for good (until it's shot).
    *
    *  `midway`: it's already halfway up (placed there now), and goes on up
    *  from there (reaching in for her there, with `grab`). */
@@ -704,8 +728,8 @@ export class Kong extends Entity {
       }
     }
     if (!climbs.length) return false;
-    // taller buildings are likelier (much likelier, carrying a blonde)
-    const weight = (c: Climb): number => tall ? c.top * c.top : c.top;
+    // taller buildings are much likelier
+    const weight = (c: Climb): number => c.top * c.top;
     let pick = Math.random() * climbs.reduce((sum, c) => sum + weight(c), 0);
     const c = climbs.find((cl) => (pick -= weight(cl)) <= 0) ?? climbs[climbs.length - 1];
     const first = c.stages[0];
@@ -754,6 +778,8 @@ export class Kong extends Entity {
         );
         stay -= 4500 + look + 1000;
       }
+      // (with her, it stays: this is as far as it goes)
+      this.tasks.push({ kind: 'keep' });
     } else {
       this.tasks.push({ kind: 'wait', msecs: rand(...ROOF_MSECS), roar: true });
     }
@@ -786,6 +812,18 @@ interface Climb { street: [number, number]; stages: Stage[]; roof: [number, numb
  *  lower x or z) along axis 0 (x) or 2 (z). */
 const faceOf = (b: Box, axis: 0 | 2, s: number): number =>
   axis === 0 ? (s > 0 ? b.x0 : b.x1) : (s > 0 ? b.z0 : b.z1);
+/** The tallest building top on the four corners of the crossing (x, z). */
+function tallestAt(world: World, x: number, z: number): number {
+  const half = BLOCKSIZE / 2;
+  let top = 0;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      for (const b of world.grid.blockBoxes(Math.floor((x + sx * half) / BLOCKSIZE), Math.floor((z + sz * half) / BLOCKSIZE))) top = Math.max(top, b.y1);
+    }
+  }
+  return top;
+}
+
 /** A box's extent along that face. */
 const lateralOf = (b: Box, axis: 0 | 2): [number, number] => axis === 0 ? [b.z0, b.z1] : [b.x0, b.x1];
 

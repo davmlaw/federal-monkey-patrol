@@ -366,6 +366,12 @@ const SCENARIOS: Record<string, Scenario> = {
     h.check(h.run(240000, { each: park, until: onTop }) || onTop(), 'it got to the top');
     h.log(`on top at y=${kong.object.position.y.toFixed(0)}`);
     h.look('on top', Harness.middle(kong), 200, ki.yaw);
+    const top = kong.object.position.y;
+    h.check(top >= kit.cfg.minTop - 1, `it's up a skyscraper (${top.toFixed(0)} up, at least ${kit.cfg.minTop})`);
+    // longer than its roaring from the roof: it stays up there with her
+    let lowest = top;
+    h.run(kit.cfg.roofMsecs[1] + 30000, { each: () => { park(); lowest = Math.min(lowest, kong!.object.position.y); } });
+    h.check(lowest > top - 5 && !!kong.blonde && !kong.isDying(), `it never comes down with her (lowest ${lowest.toFixed(0)}: ${ki.tasks.map((x) => x.kind).join(',')})`);
     const blonde = kong.blonde!;
     kong.struck(h.world, { t: 0, point: kong.object.position.clone(), normal: new THREE.Vector3(0, 0, 1) }, new THREE.Vector3(0, 0, -100), 100);
     h.check(blonde.state === 'falling', 'she falls when it is shot');

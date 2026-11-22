@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
 <!-- The story's last mission, the climax: Monkey Mayhem with blondes and
-     against the clock. Forty kongs all round the plane wherever it flies
+     against the clock. Sixty kongs all round the plane wherever it flies
      (no patrol area or radar), quick to be replaced, carrying blondes off
      up the towers, and throwing bananas at the plane. Catch three and
      down five kongs in three minutes; let one land, or run out of time,
@@ -13,7 +13,7 @@
     <name>biplane.obj</name>
     <skin>biplane_skin.jpg</skin>
   </model>
-  <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.8">40</kongs>
+  <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.8">60</kongs>
   <blondes grab_chance="1" max="4">on</blondes>
   <patrolradius>none</patrolradius>
   <radar>off</radar>

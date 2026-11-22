@@ -138,7 +138,6 @@ interface BlondeConfig {
   maxBlondes: number;
   minTop: number;
   climbSpeed: number;
-  climbChance: number;
   spawnClimbing: number;
   spawnClimbingTop: number;
   roofMsecs: [number, number];
@@ -161,7 +160,6 @@ function loadConfig(): BlondeConfig {
     maxBlondes: f('max_blondes', 3),
     minTop: f('min_top', 300),
     climbSpeed: f('carry_climb_speed', 28),
-    climbChance: f('carry_climb_chance', 0.6),
     spawnClimbing: f('spawn_climbing', 0.3),
     spawnClimbingTop: f('spawn_climbing_top', 700),
     roofMsecs: [f('roof_seconds_min', 20) * 1000, f('roof_seconds_max', 40) * 1000],
