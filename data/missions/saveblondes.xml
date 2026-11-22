@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="iso-8859-1"?>
 <!-- The story's third mission: Monkey Mayhem with blondes. Kongs all round
      the plane wherever it flies, carrying blondes off up the towers; catch
-     three as they fall. No radar, and they climb at most crossings. No time limit. -->
+     three as they fall. They climb at most crossings. No time limit. -->
 <mission>
 
 <startconditions>
@@ -13,7 +13,6 @@
   <kongs respawn_msecs="1000" health_min="2" health_max="4" climb_chance="0.9">40</kongs>
   <blondes grab_chance="0.9" max="3">on</blondes>
   <patrolradius>none</patrolradius>
-  <radar>off</radar>
 </startconditions>
 
 <outcomes>

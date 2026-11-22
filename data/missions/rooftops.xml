@@ -14,7 +14,6 @@
   <controls>1942</controls>
   <kongs on="rooftops" height="180" respawn_msecs="1000" health_min="2" health_max="4">40</kongs>
   <patrolradius>none</patrolradius>
-  <radar>off</radar>
   <countdown>
     <label>Time remaining</label>
     <seconds>180</seconds>

@@ -232,12 +232,12 @@ export class Radar extends Drawable2D {
       g.push();
       g.translate(px, py);
       if (b.kind === 'blonde') {
-        // a falling blonde: her head, blinking
-        if (blink || far) g.quad(dot * 3.6, dot * 3.6, [1, 1, 1, alpha], blondeIconTexture());
+        // a falling blonde: a yellow dot, blinking
+        if (blink || far) g.quad(dot * 2.6, dot * 2.6, far ? [1, 0.9, 0.2, 0.8 * alpha] : [1, 0.92, 0.2, alpha]);
       } else {
         g.quad(dot * 2, dot * 2, far ? [0.95, 0.55, 0.3, 0.7 * alpha] : [1, 0.4, 0.25, alpha]);
-        // carrying one: her head on the kong's dot
-        if (b.kind === 'carrying') g.quad(dot * 2.6, dot * 2.6, [1, 1, 1, alpha], blondeIconTexture());
+        // carrying one: yellow in the kong's dot
+        if (b.kind === 'carrying') g.quad(dot * 1.1, dot * 1.1, [1, 0.92, 0.2, alpha]);
       }
       g.pop();
     }

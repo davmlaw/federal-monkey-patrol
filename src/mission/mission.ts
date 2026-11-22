@@ -114,9 +114,7 @@ export class Mission extends GameComponent {
   private outside = 0;
   /** Outside, but heading back in. */
   private heading = false;
-  /** None with <radar>off</radar>. */
   private radar: Radar | null = null;
-  private showRadar = true;
   /** <view>topdown</view>: a top-down mission (no throttle), with
    *  <controls>steer</controls> to turn rather than slide sideways. */
   private flyMode: FlyMode = FlyMode.FOLLOW;
@@ -192,12 +190,10 @@ export class Mission extends GameComponent {
     const radius = this.roaming ? this.roamRadius ?? (settings.getf('game', 'roam_radius') || 2500) : this.patrolRadius;
     this.patrol = { x: pos.x, z: pos.z, r: radius ?? (settings.getf('game', 'patrol_radius') || 3200) };
     this.turnBackMsecs = (settings.getf('game', 'turn_back_seconds') || 6) * 1000;
-    if (this.showRadar) {
-      this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
-      this.hud.add(this.radar, TOP | RIGHT);
-      this.radar.position.x -= 0.015;
-      this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
-    }
+    this.radar = new Radar(RADAR_SIZE, RADAR_RANGE, this.roaming ? null : this.patrol);
+    this.hud.add(this.radar, TOP | RIGHT);
+    this.radar.position.x -= 0.015;
+    this.radar.position.y -= 0.015 + (this.countdowntimer ? this.countdowntimer.getHeight() : 0);
     this.outMessage.setColor(1, 0.85, 0.3);
     this.outMessage.position.y = 0.1;
     this.lives = settings.geti('game', 'lives') || 3;
@@ -308,7 +304,6 @@ export class Mission extends GameComponent {
     const text = (e: Element | undefined): string => (e?.textContent ?? '').trim().toLowerCase();
     if (text(sc.view) === 'topdown') this.flyMode = FlyMode.TOPDOWN;
     this.steer = text(sc.controls) === 'steer';
-    this.showRadar = text(sc.radar) !== 'off';
     this.player.controllers[FlyMode.TOPDOWN].steer = this.steer;
     this.player.setMode(this.flyMode);
     if (sc.countdown) {

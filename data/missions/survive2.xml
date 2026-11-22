@@ -19,7 +19,6 @@
   <patrolradius>none</patrolradius>
   <!-- the kongs close round the plane's path, so they come on screen -->
   <roamradius>1200</roamradius>
-  <radar>off</radar>
   <countdown>
     <label>Survive</label>
     <seconds>60</seconds>

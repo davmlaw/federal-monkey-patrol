@@ -142,6 +142,9 @@ export class Kong extends Entity {
   private health: number;
   private flash = 0;
   private roared = false;
+  /** Heard roaring: only in the game-over shot (showOff); otherwise its
+   *  roars are silent. */
+  private loud = false;
   /** Out for a blonde: walks on to a crossing with a skyscraper to climb. */
   private hunting = false;
   // falling (after being shot down)
@@ -214,6 +217,7 @@ export class Kong extends Entity {
    *  chest and roar from here on, heard from `ear`. */
   showOff(yaw: number, ear: THREE.Object3D): void {
     this.perched = true;
+    this.loud = true;
     this.ear = ear;
     this.wall = null;
     this.tasks = [{ kind: 'turn', yaw: this.yaw + angleTo(this.yaw, yaw) }];
@@ -276,6 +280,7 @@ export class Kong extends Entity {
   }
 
   private bellow(): void {
+    if (!this.loud) return;
     const v = this.volume();
     if (v > 0.03) playSound(this.roar, { volume: v, rate: this.cfg.roarPitch, bassDb: this.cfg.roarBassDb });
   }
@@ -290,7 +295,6 @@ export class Kong extends Entity {
     gamestats.inc(Stat.MONKEY_DEATHS);
     this.anim.rig.carry = false;
     let street: Street | null = null; // where she's thrown
-    this.bellow();
     const pos = this.object.position;
     const h = this.cfg.height;
     const back = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)); // behind it
@@ -543,7 +547,6 @@ export class Kong extends Entity {
         if (before < got && task.msecs >= got && this.kit && !this.blonde) {
           this.blonde = this.kit.make(world);
           this.anim.rig.carry = true;
-          this.blonde.scream();
         }
         clip = 'grab';
         done = task.msecs >= GRAB_SECONDS * 1000;
