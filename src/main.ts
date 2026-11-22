@@ -22,20 +22,14 @@ import { StoryTeller } from './game/storyteller.ts';
 import { stage } from './game/stage.ts';
 
 // The title screen's choices, each a .game file: the story, then free
-// play (single missions, data/missions/*.xml), then extras.
-type Group = 'story' | 'free' | 'extra';
+// play (single missions, data/missions/*.xml).
+type Group = 'story' | 'free';
 const GAMES: { file: string; title: string; group: Group }[] = [
   { group: 'story', file: 'data/federal_monkey_patrol.game', title: 'The Story' },
   { group: 'free', file: 'freeplay.game', title: 'Free Play' },
   { group: 'free', file: 'rooftops.game', title: 'Rooftops (top-down)' },
   { group: 'free', file: 'rooftops_steer.game', title: 'Rooftops: Steering (top-down)' },
-  { group: 'extra', file: 'mission.game', title: 'Test mission' },
-  { group: 'extra', file: 'fade_test.game', title: 'Transitions' },
 ];
-// The story's missions, in order, for the menu's "Jump to mission" links
-// (?mission=N starts the story at the Nth's title card).
-const STORY_FILE = 'data/federal_monkey_patrol.game';
-const STORY_MISSIONS = ['Kill 3 Kongs', 'Survive', 'Save 3 Blondes', 'Survive Again', 'Save 3 Blondes, Lose None, Kill 5 Kongs'];
 // "Skip to game" from a story with no missions in it
 const FREE_FLIGHT = 'freeplay.game';
 
@@ -67,12 +61,11 @@ skipLink.addEventListener('click', (e) => {
   skipToGame();
 });
 
-function gameUrl(file: string, mission = 0): string {
+function gameUrl(file: string): string {
   const u = new URL(window.location.href);
   u.searchParams.set('game', file);
   u.searchParams.delete('flow');
-  if (mission) u.searchParams.set('mission', String(mission));
-  else u.searchParams.delete('mission');
+  u.searchParams.delete('mission');
   return u.pathname + u.search;
 }
 
@@ -126,13 +119,12 @@ function lastUpdated(): string {
 function showMenu({ ended = false } = {}): void {
   const params = new URLSearchParams(window.location.search);
   const chosen = params.get('game');
-  const chosenMission = parseInt(params.get('mission') ?? '', 10) || 0;
   const esc = (t: string): string => t.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
   const sub = !ended ? 'Dave Lawrence &amp; Sam Norman, 2004&ndash;2006'
     : lastResult.title ? `<span class="result">${esc(lastResult.title)}</span> ${esc(lastResult.line)}`
     : 'The End.';
   const link = (g: (typeof GAMES)[number]): string => `
-    <a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen && !chosenMission ? 'chosen' : ''}">
+    <a href="${gameUrl(g.file)}" data-game="${g.file}" class="${g.file === chosen ? 'chosen' : ''}">
       <span class="t">${g.title}</span></a>`;
   const group = (k: Group): (typeof GAMES)[number][] => GAMES.filter((g) => g.group === k);
   overlay.innerHTML = `
@@ -143,10 +135,6 @@ function showMenu({ ended = false } = {}): void {
       <ul class="games">${group('story').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
       <h2>Free play</h2>
       <ul class="games">${group('free').map((g) => `<li>${link(g)}</li>`).join('')}</ul>
-      <p class="extras">Jump to mission: ${STORY_MISSIONS.map((t, i) => `<a href="${gameUrl(STORY_FILE, i + 1)}" data-game="${STORY_FILE}" data-mission="${i + 1}"
-        class="${chosen === STORY_FILE && chosenMission === i + 1 ? 'chosen' : ''}">${i + 1}. ${t}</a>`).join(' &middot; ')}</p>
-      <p class="extras">Extras: ${group('extra').map((g) => link(g)).join(' &middot; ')}
-        &middot; <a href="kongtest.html">Kong &amp; blonde animations</a></p>
       <p class="keys">Arrow keys: fly &middot; W / S: throttle &middot; Space: fire &middot; Esc: pause &middot;
         Top-down: up / down change speed &middot; Touch: on-screen stick, throttle and fire.</p>
       ${display.software ? `<p class="warn">Your browser is drawing with a software renderer (${display.gpu.replace(/[<>&]/g, '')}), so the game will be slow.
@@ -159,14 +147,13 @@ function showMenu({ ended = false } = {}): void {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       window.history.replaceState(null, '', a.getAttribute('href'));
-      start(a.dataset.game ?? null, parseInt(a.dataset.mission ?? '', 10) || 0);
+      start(a.dataset.game ?? null);
     });
   });
   (overlay.querySelector<HTMLAnchorElement>('a.chosen') ?? overlay.querySelector<HTMLAnchorElement>('a[data-game]'))?.focus();
 }
 
-/** `mission`: start the story at its Nth mission (0: the beginning). */
-async function start(file: string | null, mission = 0): Promise<void> {
+async function start(file: string | null): Promise<void> {
   unlockAudio();
   overlay.hidden = true;
   canvas.focus();
@@ -175,7 +162,6 @@ async function start(file: string | null, mission = 0): Promise<void> {
     await settings.load();
     await loadFont();
     game = await GameManager.fromFile(file || settings.gets('main', 'default_game'));
-    if (mission && !game.startAtMission(mission)) console.warn(`no mission ${mission} in ${file}`);
   } catch (e) {
     console.error(e);
     overlay.innerHTML = `<div class="panel"><h1>Uncaught Exception</h1><pre>${String(e instanceof Error ? e.message : e)}</pre></div>`;

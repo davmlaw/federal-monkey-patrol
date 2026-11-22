@@ -29,8 +29,8 @@ Pick one from the menu, or link to it with `?game=`:
 |---|---|
 | [`?game=data/federal_monkey_patrol.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=data/federal_monkey_patrol.game) | The story (default) |
 | [`?game=freeplay.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=freeplay.game) | Free play: the story's last mission with no goal or clock |
-| [`?game=mission.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=mission.game) | Mission `test.xml`, with a countdown |
-| [`?game=fade_test.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=fade_test.game) | Transition effects demo |
+| [`?game=rooftops.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=rooftops.game) | Rooftops: top-down, 1942 controls |
+| [`?game=rooftops_steer.game`](https://davmlaw.github.io/federal-monkey-patrol/?game=rooftops_steer.game) | Rooftops: top-down, steering |
 
 ### Controls
 
