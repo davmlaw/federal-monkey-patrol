@@ -55,6 +55,8 @@ export class Entity {
   bank: THREE.Object3D | null = null;
   /** Collides with the city as a sphere of this radius (null: doesn't). */
   radius: number | null = null;
+  /** Where it was before this frame's update (set by World.update). */
+  readonly lastPosition = new THREE.Vector3();
   /** Can be shot (and flown into): see intersect() and struck(). */
   shootable = false;
 
@@ -752,6 +754,7 @@ export class World {
     const from = new THREE.Vector3();
     for (const e of this.entities.slice()) {
       from.copy(e.object.position);
+      e.lastPosition.copy(from);
       e.update(this, msecs);
       if (e.radius === null || e.isDead()) continue;
       let hit = this.grid.sweep(from, e.object.position, e.radius);

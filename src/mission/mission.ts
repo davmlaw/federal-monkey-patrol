@@ -2,7 +2,7 @@
 // city with its HUD, until an outcome changes the status.
 
 import * as THREE from 'three';
-import { ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
+import { display as theDisplay, ORTHO_H, ORTHO_W, type Display } from '../core/display.ts';
 import { Container2D, LEFT, RIGHT, Text2D, textWidth, TOP } from '../core/draw2d.ts';
 import { fetchText, playBang } from '../core/assets.ts';
 import { dircheck, settings } from '../core/settings.ts';
@@ -11,7 +11,7 @@ import { GameComponent, Status } from '../game/component.ts';
 import { Constraints, Outcomes, xmlMap, xmlStringMap } from './outcomes.ts';
 import { gamestats, Stat } from './stats.ts';
 import { FlyMode, makeCameraMan, Player, World, type CameraMan } from './world.ts';
-import { Banner, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, LivesDisplay, LoadBar, Radar, Tally, TurnBack } from './hud.ts';
+import { Banner, blondeIconTexture, ClawAlert, CountDownTimer, FogPlane, FPSCounter, fpsOverlay, IconTally, KissPop, LivesDisplay, LoadBar, Radar, TurnBack } from './hud.ts';
 import { CityGrid, loadCityMaterials } from './city.ts';
 import { KongTroop, type Area, type TroopOptions } from './kongs.ts';
 
@@ -118,8 +118,10 @@ export class Mission extends GameComponent {
   private turnBack = new TurnBack();
   private outMessage = new Text2D('Out of bounds: you lost a plane', 0.25);
   private outMessageMsecs = 0;
-  private blondeMessage = new Text2D('Caught her!', 0.25);
+  /** "Missed her!" (one caught gets a kiss instead). */
+  private blondeMessage = new Text2D('', 0.25);
   private blondeMessageMsecs = 0;
+  private kiss = new KissPop();
   // Set by _load(); the mission is only played once it has loaded.
   private fogplane!: FogPlane;
   private hud!: Container2D;
@@ -131,9 +133,10 @@ export class Mission extends GameComponent {
    *  area (game.properties roam_radius) goes along with the plane, centred
    *  a little ahead of it. */
   private roaming = false;
-  private tally = new Tally();
+  /** Kongs downed (or left), as a kong's head and "x3". */
+  private tally!: IconTally;
   /** Blondes caught, under the kongs (when there are blondes). */
-  private blondeTally = new Tally(0.18);
+  private blondeTally: IconTally | null = null;
   /** An outcome has ended the mission: the status to take when the banner
    *  has shown for ENDING_MSECS. */
   private ending: { status: Status; msecs: number } | null = null;
@@ -181,8 +184,6 @@ export class Mission extends GameComponent {
     }
     this.outMessage.setColor(1, 0.85, 0.3);
     this.outMessage.position.y = 0.1;
-    this.hud.add(this.tally, TOP);
-    this.tally.position.y -= 0.06; // below the pause button
     this.lives = settings.geti('game', 'lives') || 3;
     this.livesDisplay = await LivesDisplay.create(this.lives);
     this.hud.add(this.livesDisplay, TOP | LEFT);
@@ -197,10 +198,14 @@ export class Mission extends GameComponent {
     this.world = new World(grid);
     this.world.addEntity(this.player.entity);
     this.kongs = await KongTroop.create(this.kongOptions, this.patrol);
+    this.tally = new IconTally(this.kongs.portrait(theDisplay.renderer), 0.22, this.kongs.respawns ? '' : 'LEFT');
+    this.hud.add(this.tally, TOP);
+    this.tally.position.y -= 0.06; // below the pause button
     if (this.kongs.blondes) {
       this.kongs.blondes.plane = this.player.entity;
+      this.blondeTally = new IconTally(blondeIconTexture(), 0.22);
       this.hud.add(this.blondeTally, TOP);
-      this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.01;
+      this.blondeTally.position.y = this.tally.position.y - this.tally.getHeight() - 0.005;
       this.blondeTally.setColor(1, 0.95, 0.7);
     }
     this.blondeMessage.position.y = 0.2;
@@ -328,11 +333,8 @@ export class Mission extends GameComponent {
     world.update(msecs);
     if (this.kongs) {
       gamestats.set(Stat.MONKEY_POPULATION, this.kongs.remaining());
-      const kongs = this.kongs.respawns
-        ? `KONGS DOWNED ${gamestats.get(Stat.MONKEY_DEATHS)}`
-        : `KONGS LEFT ${this.kongs.remaining()}`;
-      this.tally.text = kongs;
-      this.blondeTally.text = this.kongs.blondes ? `BLONDES CAUGHT ${gamestats.get(Stat.BLONDE_RESCUES)}` : '';
+      this.tally.count = this.kongs.respawns ? gamestats.get(Stat.MONKEY_DEATHS) : this.kongs.remaining();
+      if (this.blondeTally) this.blondeTally.count = gamestats.get(Stat.BLONDE_RESCUES);
       this.blondeEvents(msecs);
     }
     if (!plane.crashed && !this.ending && !this.roaming) this.checkBounds(msecs);
@@ -346,17 +348,22 @@ export class Mission extends GameComponent {
     }
   }
 
-  /** "Caught her!" when a blonde is caught, "Missed her!" when one lands. */
+  /** A kiss (a heart or lipstick) when a blonde is caught, "Missed her!"
+   *  when one lands. */
   private blondeEvents(msecs: number): void {
     this.blondeMessageMsecs = Math.max(0, this.blondeMessageMsecs - msecs);
+    this.kiss.update(msecs);
     const kit = this.kongs?.blondes;
     if (!kit?.events.length) return;
     const caught = kit.events.pop() === 'caught';
     kit.events.length = 0;
-    this.blondeMessage.text = caught ? 'Caught her!' : 'Missed her! She landed with a bump';
+    if (caught) {
+      this.kiss.pop();
+      return;
+    }
+    this.blondeMessage.text = 'Missed her! She landed with a bump';
     this.blondeMessage.setWidth(textWidth(this.blondeMessage.text) * this.blondeMessage.font);
-    if (caught) this.blondeMessage.setColor(1, 0.95, 0.6);
-    else this.blondeMessage.setColor(0.85, 0.85, 0.85);
+    this.blondeMessage.setColor(0.85, 0.85, 0.85);
     this.blondeMessageMsecs = BLONDE_MESSAGE_MSECS;
   }
 
@@ -421,6 +428,7 @@ export class Mission extends GameComponent {
     }
     if (this.outMessageMsecs > 0) display.draw2d(this.outMessage);
     if (this.blondeMessageMsecs > 0 && !this.ending) display.draw2d(this.blondeMessage);
+    if (this.kiss.showing) display.draw2d(this.kiss);
     if (this.ending) display.draw2d(this.banner);
     else if (this.player.entity.crashed && this.lives <= 0) display.draw2d(this.gameOver);
     if (msecs) {

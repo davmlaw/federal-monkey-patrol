@@ -25,6 +25,7 @@ import { Mission } from './mission/mission.ts';
 import { gamestats, Stat } from './mission/stats.ts';
 import type { Kong, Area } from './mission/kongs.ts';
 import { BLOCKSIZE } from './mission/city.ts';
+import { blondeIconTexture, KissPop } from './mission/hud.ts';
 import type { World, Plane } from './mission/world.ts';
 
 const params = new URLSearchParams(location.search);
@@ -204,18 +205,45 @@ const SCENARIOS: Record<string, Scenario> = {
     h.frame('falling (her head on the radar)');
     if (params.has('catch')) {
       h.run(240000, { each: park, until: () => blonde.object.position.y < from.y - 150 || blonde.state !== 'falling' });
-      h.plane.object.position.copy(blonde.object.position).add(new THREE.Vector3(0, 0, 10));
+      h.log(`she is ${blonde.state} at y=${blonde.object.position.y.toFixed(0)} (from ${from.y.toFixed(0)})`);
+      h.plane.object.position.copy(blonde.object.position);
       h.run(50);
+      h.log(`then she is ${blonde.state}, the plane ${h.plane.object.position.distanceTo(blonde.object.position).toFixed(1)} from her`);
       h.check(blonde.state === 'caught' && gamestats.get(Stat.BLONDE_RESCUES) === 1, 'flying through her catches her');
-      h.frame('caught');
+      h.frame('caught (a kiss, and the tallies)', 8);
     } else {
       h.run(240000, { each: park, until: () => blonde.state !== 'falling' });
       const p = blonde.object.position;
       h.check(blonde.state === 'landed' && gamestats.get(Stat.BLONDE_CASUALTIES) === 1, `she landed (at y=${p.y.toFixed(0)}, ${Math.hypot(p.x - from.x, p.z - from.z).toFixed(0)} out)`);
-      h.check(p.y < from.y - 50, 'she was thrown clear of the roof');
+      const street = Math.min(Math.abs(p.x - Math.round(p.x / BLOCKSIZE) * BLOCKSIZE), Math.abs(p.z - Math.round(p.z / BLOCKSIZE) * BLOCKSIZE));
+      h.check(p.y < 1 && street < 45, `she came down in the street (${street.toFixed(0)} off its middle)`);
       h.run(1000);
       h.look('landed', p.clone().add(new THREE.Vector3(0, 5, 0)), 40);
     }
+  },
+
+  /** The HUD's icons, large: the kong's head (rendered from the model),
+   *  the blonde's, and the kisses for catching her. */
+  icons(h) {
+    const kongs = h.mission.kongs;
+    if (!kongs) throw new Error('no kongs in this mission');
+    const kiss = new KissPop() as unknown as { textures: Record<string, THREE.Texture> };
+    const show: [string, THREE.Texture][] = [
+      ['kong', kongs.portrait(display.renderer, 256)],
+      ['blonde', blondeIconTexture()],
+      ...Object.entries(kiss.textures),
+    ];
+    for (const [label, t] of show) {
+      const d = document.createElement('figure');
+      const img = t.image as HTMLCanvasElement;
+      img.style.width = img.style.height = '200px';
+      img.style.background = '#8a8a80';
+      const cap = document.createElement('figcaption');
+      cap.textContent = label;
+      d.append(img, cap);
+      h.shots.append(d);
+    }
+    h.frame('in the HUD');
   },
 
   /** Kongs shot up on buildings fall down to the street: `n` (default 3)

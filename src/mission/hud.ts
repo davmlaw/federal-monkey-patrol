@@ -1,5 +1,5 @@
 // HUD widgets: FogPlane, CountDownTimer, ClawAlert, LivesDisplay, Radar,
-// TurnBack, Tally, Banner, the FPS readout, and the "generating
+// TurnBack, IconTally, KissPop, Banner, the FPS readout, and the "generating
 // skyscrapers" LoadBar.
 
 import * as THREE from 'three';
@@ -166,7 +166,6 @@ export function blondeIconTexture(): THREE.Texture {
     c.width = c.height = 64;
     drawBlondeHead(c.getContext('2d')!, 32, 34, 19);
     blondeIcon = new THREE.CanvasTexture(c);
-    blondeIcon.colorSpace = THREE.SRGBColorSpace;
     blondeIcon.flipY = false;
   }
   return blondeIcon;
@@ -298,25 +297,144 @@ export class TurnBack extends Drawable2D {
   }
 }
 
-/** One line of HUD text that changes, e.g. "KONGS LEFT 5". */
-export class Tally extends Drawable2D {
+/** A HUD count as an icon and "x3" (and an optional word after). */
+export class IconTally extends Drawable2D {
   private line: Text2D;
+  private iconSize: number;
 
-  constructor(font = 0.22) {
+  /** `icon`: flipY false (v = 0 at the top), square. */
+  constructor(private icon: THREE.Texture, font = 0.22, private after = '') {
     super();
     this.line = new Text2D('', font);
-    this.setHeight(textHeight('0') * font);
+    this.iconSize = textHeight('0') * font * 1.9;
+    this.setHeight(this.iconSize);
+    this.count = 0;
   }
 
-  set text(t: string) {
+  set count(n: number) {
+    const t = `x${n}${this.after ? ` ${this.after}` : ''}`;
     if (t === this.line.text) return;
     this.line.text = t;
     this.line.setWidth(textWidth(t) * this.line.font);
-    this.setWidth(this.line.getWidth());
+    this.setWidth(this.iconSize * 1.1 + this.line.getWidth());
   }
 
   protected override representation(g: Batch2D, alpha: number): void {
+    const w = this.getWidth();
+    g.push();
+    g.translate(-w / 2 + this.iconSize / 2, 0);
+    g.quad(this.iconSize, this.iconSize, [1, 1, 1, alpha], this.icon);
+    g.pop();
+    this.line.color = this.color;
+    this.line.position = { x: w / 2 - this.line.getWidth() / 2, y: 0 };
     this.line.draw(g, alpha);
+  }
+}
+
+/** A cartoon heart or a lipstick kiss, as a canvas texture (flipY false). */
+function kissTexture(kind: 'heart' | 'lips'): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const ink = '#3a0610';
+  g.lineJoin = 'round';
+  if (kind === 'heart') {
+    const heart = new Path2D();
+    heart.moveTo(64, 112);
+    heart.bezierCurveTo(30, 88, 6, 66, 10, 40);
+    heart.bezierCurveTo(14, 14, 50, 6, 64, 34);
+    heart.bezierCurveTo(78, 6, 114, 14, 118, 40);
+    heart.bezierCurveTo(122, 66, 98, 88, 64, 112);
+    heart.closePath();
+    g.fillStyle = '#e8203c';
+    g.fill(heart);
+    g.lineWidth = 7;
+    g.strokeStyle = ink;
+    g.stroke(heart);
+    // a cartoon shine
+    g.beginPath();
+    g.ellipse(38, 38, 10, 6, -0.7, 0, Math.PI * 2);
+    g.fillStyle = '#ffd6dc';
+    g.fill();
+  } else {
+    // a lipstick print: upper lip with its bow, fuller lower lip, a gap
+    const upper = new Path2D();
+    upper.moveTo(10, 66);
+    upper.bezierCurveTo(24, 46, 38, 26, 50, 28);
+    upper.bezierCurveTo(57, 29, 61, 36, 64, 40);
+    upper.bezierCurveTo(67, 36, 71, 29, 78, 28);
+    upper.bezierCurveTo(90, 26, 104, 46, 118, 66);
+    upper.bezierCurveTo(98, 62, 80, 64, 64, 66);
+    upper.bezierCurveTo(48, 64, 30, 62, 10, 66);
+    upper.closePath();
+    const lower = new Path2D();
+    lower.moveTo(12, 70);
+    lower.bezierCurveTo(32, 68, 48, 72, 64, 72);
+    lower.bezierCurveTo(80, 72, 96, 68, 116, 70);
+    lower.bezierCurveTo(104, 96, 84, 104, 64, 104);
+    lower.bezierCurveTo(44, 104, 24, 96, 12, 70);
+    lower.closePath();
+    for (const lip of [upper, lower]) {
+      g.fillStyle = '#d81a3a';
+      g.fill(lip);
+      g.lineWidth = 5;
+      g.strokeStyle = ink;
+      g.stroke(lip);
+    }
+    // the print's creases
+    g.strokeStyle = 'rgba(80, 0, 20, 0.6)';
+    g.lineWidth = 2.5;
+    for (let i = -4; i <= 4; i++) {
+      if (!i) continue;
+      const x = 64 + i * 11;
+      g.beginPath();
+      g.moveTo(x, 75 + Math.abs(i) * 0.5);
+      g.lineTo(x + i * 0.8, 92 - Math.abs(i) * 2);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(x, 62 - Math.abs(i) * 0.3);
+      g.lineTo(x + i * 0.6, 52 + Math.abs(i) * 1.5);
+      g.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.flipY = false;
+  return t;
+}
+
+const KISS_MSECS = 1300;
+
+/** A blonde caught: a cartoon heart or a lipstick kiss pops up on the
+ *  screen for a moment, tilted, then fades. */
+export class KissPop extends Drawable2D {
+  private textures = { heart: kissTexture('heart'), lips: kissTexture('lips') };
+  private kind: 'heart' | 'lips' = 'heart';
+  private msecs = 0;
+  private tilt = 0;
+
+  /** Pop one up, somewhere round the middle of the screen. */
+  pop(): void {
+    this.kind = Math.random() < 0.5 ? 'heart' : 'lips';
+    this.msecs = KISS_MSECS;
+    this.tilt = (Math.random() * 2 - 1) * 20;
+    this.position = { x: (Math.random() * 2 - 1) * 0.15, y: 0.05 + Math.random() * 0.1 };
+  }
+
+  get showing(): boolean { return this.msecs > 0; }
+
+  update(msecs: number): void { this.msecs = Math.max(0, this.msecs - msecs); }
+
+  protected override representation(g: Batch2D, alpha: number): void {
+    if (this.msecs <= 0) return;
+    const t = 1 - this.msecs / KISS_MSECS; // 0..1
+    // springs up past full size and settles, then fades
+    const grow = Math.min(1, t / 0.15);
+    const size = 0.22 * (grow < 1 ? 1.25 * grow : 1 + 0.25 * Math.exp(-(t - 0.15) * 18) * Math.cos((t - 0.15) * 40));
+    const fade = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35;
+    g.push();
+    g.rotate(this.tilt);
+    g.quad(size, size, [1, 1, 1, alpha * fade], this.textures[this.kind]);
+    g.pop();
   }
 }
 

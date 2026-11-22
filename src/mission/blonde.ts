@@ -174,7 +174,17 @@ const CATCH_MSECS = 350; // whisked into the plane
 const HEARING = 2500;
 const BLINK_MSECS = 300; // the marker over her as she falls
 const THROW_SPEED = 45; // thrown clear of a roof by a kong shot up there
-const THROW_SLOW = 1.2; // 1/s: how fast that dies away
+// ...and steered out to the middle of the street, at up to this speed
+// across it, so she comes down where the plane can catch her
+const STREET_SPEED = 45;
+const STREET_PULL = 1.2; // 1/s: towards the middle
+const STREET_EASE = 1.5; // 1/s: how fast her speed across it changes
+const LEDGE_HOP = 10; // landing on a ledge on the way down, she's bounced off it this fast
+const MAX_HOPS = 30;
+
+/** A street to come down in: running along `axis`... at `at` on the other
+ *  axis. (Streets run along multiples of BLOCKSIZE.) */
+export interface Street { axis: 'x' | 'z'; at: number }
 
 type State = 'held' | 'falling' | 'caught' | 'landed';
 
@@ -212,8 +222,11 @@ export class Blonde extends Entity {
   private drift = new THREE.Vector3();
   private marker: THREE.Sprite;
   private spin = 0;
-  /** Thrown off a roof: this fast across the ground, slowing. */
-  private toss = new THREE.Vector3();
+  /** Thrown off a building: the street she comes down in, and her speed
+   *  across it. */
+  private street: Street | null = null;
+  private streetVel = 0;
+  private hops = 0;
 
   constructor(
     private pose: THREE.Group, // turned to face -Z (as the kongs do)
@@ -256,14 +269,15 @@ export class Blonde extends Entity {
     if (v > 0.03) playScream(v);
   }
 
-  /** Let go of: she floats down, at first going `thrown` (a direction on
-   *  the ground: off the building, clear of the roof), if given. */
-  drop(thrown: THREE.Vector3 | null = null): void {
+  /** Let go of: she floats down; up on a building, thrown out to the
+   *  middle of `street`, bouncing off any ledges in the way. */
+  drop(street: Street | null = null): void {
     if (this.state !== 'held') return;
     this.state = 'falling';
     this.stateMsecs = 0;
     this.velocity.set(0, 0, 0);
-    if (thrown) this.toss.copy(thrown).setY(0).setLength(THROW_SPEED);
+    this.street = street;
+    if (street) this.streetVel = Math.sign(street.at - this.object.position[street.axis]) * THROW_SPEED;
     this.spin = this.object.rotation.y;
     const a = Math.random() * Math.PI * 2;
     this.drift.set(Math.sin(a), 0, Math.cos(a)).multiplyScalar(3 + Math.random() * 4);
@@ -296,16 +310,27 @@ export class Blonde extends Entity {
         this.velocity.y = Math.max(-cfg.fallSpeed, this.velocity.y - GRAVITY * dt);
         const from = pos.clone();
         const sway = Math.sin(this.clock * 0.9);
-        pos.x += (this.toss.x + this.drift.x + 4 * sway * this.drift.z / (this.drift.length() || 1)) * dt;
-        pos.z += (this.toss.z + this.drift.z - 4 * sway * this.drift.x / (this.drift.length() || 1)) * dt;
-        this.toss.multiplyScalar(Math.exp(-THROW_SLOW * dt));
+        const st = this.street;
+        if (st) {
+          // out over the street and along it to the middle; drifting only along it
+          const want = THREE.MathUtils.clamp(STREET_PULL * (st.at - pos[st.axis]), -STREET_SPEED, STREET_SPEED);
+          this.streetVel += (want - this.streetVel) * Math.min(1, STREET_EASE * dt);
+          pos[st.axis] += this.streetVel * dt;
+          const along = st.axis === 'x' ? 'z' : 'x';
+          pos[along] += (this.drift[along] + 3 * sway) * dt;
+        } else {
+          pos.x += (this.drift.x + 4 * sway * this.drift.z / (this.drift.length() || 1)) * dt;
+          pos.z += (this.drift.z - 4 * sway * this.drift.x / (this.drift.length() || 1)) * dt;
+        }
         pos.y += this.velocity.y * dt;
         this.spin += 0.5 * dt;
         this.object.rotation.set(0.12 * Math.sin(this.clock * 1.2), this.spin, 0.12 * Math.sin(this.clock * 0.9));
         this.marker.visible = Math.floor(this.stateMsecs / BLINK_MSECS) % 3 !== 2;
         // caught?
         const plane = this.kit.plane;
-        if (plane && !plane.crashed && plane.object.position.distanceTo(pos) < cfg.catchRadius) {
+        // (anywhere along the plane's path this frame: it's fast)
+        const near = (p: Entity): number => new THREE.Line3(p.lastPosition, p.object.position).closestPointToPoint(pos, true, new THREE.Vector3()).distanceTo(pos);
+        if (plane && !plane.crashed && near(plane) < cfg.catchRadius) {
           this.state = 'caught';
           this.stateMsecs = 0;
           this.caughtFrom.copy(pos);
@@ -318,15 +343,20 @@ export class Blonde extends Entity {
         // down on a roof or the street? (her feet)
         const feet = (BLONDE_WAIST_Y - BLONDE_GROUND_Y) * cfg.height / BLONDE_HEIGHT;
         const hit = world.grid.sweep(from.clone().setY(from.y - feet), pos.clone().setY(pos.y - feet), 0);
-        if (hit && hit.normal.y > 0.5) {
+        if (hit && hit.normal.y > 0.5 && st && hit.point.y > 1 && this.hops < MAX_HOPS) {
+          // a ledge on the way down to the street: bounced off it, on out
+          this.hops++;
+          pos.y = hit.point.y + feet + 0.5;
+          this.velocity.y = LEDGE_HOP;
+          this.streetVel += Math.sign(st.at - pos[st.axis]) * THROW_SPEED * 0.5;
+        } else if (hit && hit.normal.y > 0.5) {
           pos.set(hit.point.x, hit.point.y, hit.point.z);
           this.land(world);
         } else if (hit) {
-          // drifted into a wall: straight down from here
+          // drifted into a wall: straight down from here (or on out)
           pos.x = from.x;
           pos.z = from.z;
           this.drift.set(0, 0, 0);
-          this.toss.set(0, 0, 0);
         }
         break;
       }
